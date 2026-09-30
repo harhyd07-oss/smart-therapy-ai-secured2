@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
-import { progressFetch } from '@/lib/progressApi';
+import { authFetch, progressFetch } from '@/lib/progressApi';
 import type { PracticeBooking, PracticeClient, PracticeInvite, PracticeSession } from '@/lib/practice';
 
 /**
@@ -26,9 +26,10 @@ export function usePracticeData() {
     const param = isTherapist ? `therapistId=${profile.id}` : `clientId=${profile.id}`;
     try {
       const [sRes, bRes, cRes, iData] = await Promise.all([
-        fetch(`/api/sessions?${param}`),
-        fetch(`/api/bookings?${param}`),
-        isTherapist ? fetch(`/api/clients?therapistId=${profile.id}`) : null,
+        // Authenticated: the server scopes all three to the token's owner.
+        authFetch(`/api/sessions?${param}`),
+        authFetch(`/api/bookings?${param}`),
+        isTherapist ? authFetch(`/api/clients?therapistId=${profile.id}`) : null,
         // Authenticated: invites carry client phone numbers.
         isTherapist ? progressFetch('/api/invites').catch(() => null) : null,
       ]);

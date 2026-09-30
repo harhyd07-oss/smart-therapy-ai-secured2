@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateSessionReport } from '@/lib/report/generate'
 import { getReportStats } from '@/lib/report/session-data'
-import { requireTherapist } from '@/lib/progressAuth'
+import { requireTherapist, requireUser } from '@/lib/progressAuth'
+import { isParty, notFound } from '@/lib/ownership'
 
 function ageFrom(dob: Date | null | undefined): number | undefined {
   if (!dob) return undefined
@@ -10,13 +11,25 @@ function ageFrom(dob: Date | null | undefined): number | undefined {
   return Math.max(0, Math.floor(diff / (365.25 * 24 * 3600 * 1000)))
 }
 
-// Fetch the stored report for a session.
+// Fetch the stored report for a session. The session's own therapist or own
+// client (from the ID token) may read it; anyone else gets the same 404 as a
+// session that doesn't exist.
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const auth = await requireUser(req)
+  if (!auth.ok) return auth.response
+
   const sessionId = new URL(req.url).searchParams.get('sessionId')
   if (!sessionId) {
     return NextResponse.json({ error: 'sessionId is required' }, { status: 400 })
+  }
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { therapistId: true, clientId: true },
+  })
+  if (!session || !isParty(auth, session)) {
+    return notFound('Session')
   }
   const report = await prisma.sessionReport.findUnique({ where: { sessionId } })
   // Stats live on the Firestore session doc, saved when the report was generated.

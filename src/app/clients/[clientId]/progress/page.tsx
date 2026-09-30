@@ -12,6 +12,7 @@ import {
   fetchClientReports,
   fetchClientNotes,
   createMetric,
+  authFetch,
   type ProgressMetric,
   type ProgressReport,
   type ProgressNote,
@@ -59,7 +60,7 @@ export default function ClientProgressPage() {
         fetchClientMetrics(clientId),
         fetchClientReports(clientId),
         fetchClientNotes(clientId),
-        fetch(`/api/clients?therapistId=${profile?.id || ''}`).then((res) => res.json()),
+        authFetch('/api/clients').then((res) => res.json()),
       ]);
       setMetrics(m);
       setReports(r);

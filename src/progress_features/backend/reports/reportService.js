@@ -7,16 +7,17 @@
 import { jsPDF } from 'jspdf';
 import { getClientMetrics } from '../measurement/measurementService.js';
 
-export async function generateClientReportPdf(prisma, clientId) {
+// `scope` (e.g. { therapistId }) narrows every query — see measurementService.js.
+export async function generateClientReportPdf(prisma, clientId, scope = {}) {
   const client = await prisma.profileClient.findUnique({ where: { id: clientId } });
   if (!client) {
     throw new Error('Client not found');
   }
 
-  const metrics = await getClientMetrics(prisma, clientId);
+  const metrics = await getClientMetrics(prisma, clientId, scope);
 
   const sessions = await prisma.session.findMany({
-    where: { clientId },
+    where: { clientId, ...scope },
     orderBy: { scheduledAt: 'desc' },
     take: 50, // most recent 50 — keeps the PDF a reasonable length
   });

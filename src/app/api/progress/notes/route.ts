@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireTherapist } from '@/lib/progressAuth';
+import { notFound, therapistHasClient } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +17,9 @@ export async function GET(request: Request) {
 
     if (!clientId) {
       return NextResponse.json({ error: 'clientId is required' }, { status: 400 });
+    }
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
     }
 
     const notes = await prisma.progressNote.findMany({
@@ -48,9 +52,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'clientId and content are required' }, { status: 400 });
     }
 
-    const client = await prisma.profileClient.findUnique({ where: { id: clientId } });
-    if (!client) {
-      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    // Only this therapist's own client, and only a report of theirs about them.
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
+    }
+    if (reportId) {
+      const report = await prisma.progressReport.findUnique({
+        where: { id: reportId },
+        select: { therapistId: true, clientId: true },
+      });
+      if (!report || report.therapistId !== auth.therapist.id || report.clientId !== clientId) {
+        return notFound('Progress report');
+      }
     }
 
     const note = await prisma.progressNote.create({

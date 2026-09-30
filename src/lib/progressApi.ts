@@ -31,6 +31,18 @@ export async function progressFetch(input: string, init: RequestInit = {}) {
   return res.json();
 }
 
+/**
+ * Like `fetch`, but attaches the signed-in user's (therapist OR client)
+ * Firebase ID token and returns the raw Response, so existing callers keep
+ * their own `res.ok` handling. Signed out → no header → the server's 401.
+ */
+export async function authFetch(input: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers || {});
+  const user = auth.currentUser;
+  if (user) headers.set('Authorization', `Bearer ${await user.getIdToken()}`);
+  return fetch(input, { ...init, headers });
+}
+
 export interface ProgressMetric {
   id: string;
   clientId: string;

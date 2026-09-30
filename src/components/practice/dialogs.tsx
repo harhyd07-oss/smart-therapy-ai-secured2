@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Check, Copy, Loader2, Mail, MessageCircle, Send } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { DsDialog, Drawer, Field, Spinner, toast } from './ui';
-import { progressFetch } from '@/lib/progressApi';
+import { authFetch, progressFetch } from '@/lib/progressApi';
 import { normalizeIndianPhone, whatsAppLink } from '@/lib/phone';
 import {
   DAY_NAMES,
@@ -705,7 +705,7 @@ export function NotesDrawer({
     if (!session) return;
     setDraft('');
     setLoading(true);
-    fetch(`/api/notes?sessionId=${session.id}`)
+    authFetch(`/api/notes?sessionId=${session.id}`)
       .then((r) => (r.ok ? r.json() : { notes: [] }))
       .then((d) => setNotes(d.notes ?? []))
       .catch(() => setNotes([]))
@@ -716,7 +716,7 @@ export function NotesDrawer({
     if (!session || !profile?.id || !draft.trim()) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/notes', {
+      const res = await authFetch('/api/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: session.id, therapistId: profile.id, content: draft.trim() }),

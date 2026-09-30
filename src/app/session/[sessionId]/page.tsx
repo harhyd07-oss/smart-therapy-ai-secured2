@@ -6,7 +6,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useRouter } from 'next/navigation';
 import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
-import { progressFetch } from '@/lib/progressApi';
+import { authFetch, progressFetch } from '@/lib/progressApi';
 import {
   Mic, MicOff, Camera, CameraOff, PhoneOff, Settings, Smile,
   Maximize2, Minimize2,
@@ -204,7 +204,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     showToast(`${moduleName} launched`);
     // Log module usage for the admin dashboard (best-effort).
     if (isTherapist && profile?.id) {
-      fetch('/api/usage', {
+      authFetch('/api/usage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ therapistId: profile.id, type: 'MODULE_LAUNCH', label: moduleId, sessionId }),
@@ -250,7 +250,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     // simply fires once the documents appear.
     const joinSession = async () => {
       try {
-        await fetch(`/api/sessions/${sessionId}`, {
+        await authFetch(`/api/sessions/${sessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'start' }),
@@ -468,7 +468,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     // Mark the scheduled session as COMPLETED in the database so it moves into
     // the client's session history once the call is cut.
     try {
-      await fetch(`/api/sessions/${sessionId}`, {
+      await authFetch(`/api/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'end' }),
@@ -477,7 +477,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     // Log transcription volume for the admin dashboard (therapist side, best-effort).
     if (isTherapist && profile?.id && transcription.chunkCount > 0) {
       try {
-        await fetch('/api/usage', {
+        await authFetch('/api/usage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ therapistId: profile.id, type: 'TRANSCRIPTION', count: transcription.chunkCount, sessionId }),

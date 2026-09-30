@@ -1,19 +1,23 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireTherapist, requireUser } from '@/lib/progressAuth';
+import { notFound, therapistHasClient } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
+// GET /api/sessions — the signed-in caller's own sessions. A therapist gets
+// theirs, a client gets theirs; both come from the ID token. The legacy
+// ?therapistId= / ?clientId= query parameters are ignored.
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const therapistId = searchParams.get('therapistId');
-    const clientId = searchParams.get('clientId');
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
 
-    if (therapistId) {
+  try {
+    if (auth.therapist) {
       // Note count + report presence let the UI flag completed sessions whose
       // documentation is still outstanding ("Notes pending").
       const sessions = await prisma.session.findMany({
-        where: { therapistId },
+        where: { therapistId: auth.therapist.id },
         include: {
           client: true,
           report: { select: { id: true } },
@@ -24,27 +28,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ sessions });
     }
 
-    if (clientId) {
-      const sessions = await prisma.session.findMany({
-        where: { clientId },
-        include: {
-          therapist: true,
-        },
-        orderBy: { scheduledAt: 'desc' },
-      });
-      return NextResponse.json({ sessions });
-    }
-
-    return NextResponse.json({ error: 'Missing filter parameter' }, { status: 400 });
+    const sessions = await prisma.session.findMany({
+      where: { clientId: auth.client!.id },
+      include: {
+        therapist: true,
+      },
+      orderBy: { scheduledAt: 'desc' },
+    });
+    return NextResponse.json({ sessions });
   } catch (error: any) {
     console.error('Sessions GET error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
+// POST /api/sessions — the signed-in therapist books a session with one of
+// THEIR clients. The therapist comes from the token (a body therapistId is
+// ignored). New therapist–client relationships start from an invite, never
+// from here, so an unlinked client is a 404.
 export async function POST(request: Request) {
+  const auth = await requireTherapist(request);
+  if (!auth.ok) return auth.response;
+  const therapistId = auth.therapist.id;
+
   try {
-    const { therapistId, clientId, scheduledAt } = await request.json();
+    const { clientId, scheduledAt } = await request.json();
 
     // If clientId is a userId (firebase UID), look up the profile ID
     let finalClientId = clientId;
@@ -57,6 +65,10 @@ export async function POST(request: Request) {
       } else {
         return NextResponse.json({ error: 'Client not found' }, { status: 404 });
       }
+    }
+
+    if (!finalClientId || !(await therapistHasClient(therapistId, finalClientId))) {
+      return notFound('Client');
     }
 
     const session = await prisma.session.create({

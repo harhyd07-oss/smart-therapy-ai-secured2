@@ -22,7 +22,7 @@ import {
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import SessionReportView from '@/components/report/SessionReportView';
 import type { ReportStats } from '@/lib/report/stats';
-import { progressFetch } from '@/lib/progressApi';
+import { authFetch, progressFetch } from '@/lib/progressApi';
 import { useNow, usePracticeData, useTherapistGuard } from '@/hooks/usePracticeData';
 import { useSessionActions } from '@/components/practice/useSessionActions';
 import {
@@ -221,7 +221,7 @@ export default function SessionsPage() {
     setReportStats(null);
     setReportLoading(true);
     try {
-      const res = await fetch(`/api/session-report?sessionId=${s.id}`);
+      const res = await authFetch(`/api/session-report?sessionId=${s.id}`);
       if (res.ok) {
         const d = await res.json();
         if (d.report) {

@@ -1,22 +1,33 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireTherapist } from '@/lib/progressAuth';
+import { notFound } from '@/lib/ownership';
 
 const ALLOWED_TYPES = ['AI_ANALYSIS', 'TRANSCRIPTION', 'MODULE_LAUNCH'];
 
-// POST /api/usage — log a resource-usage event for a therapist.
-// Body: { therapistId (ProfileTherapist.id), type, label?, sessionId?, count? }
+// POST /api/usage — log a resource-usage event for the signed-in therapist.
+// Body: { type, label?, sessionId?, count? }. The therapist comes from the ID
+// token (a body therapistId is ignored); a sessionId must be one of theirs.
 export async function POST(request: Request) {
-  try {
-    const { therapistId, type, label, sessionId, count } = await request.json();
+  const auth = await requireTherapist(request);
+  if (!auth.ok) return auth.response;
+  const therapistId = auth.therapist.id;
 
-    if (!therapistId || !ALLOWED_TYPES.includes(type)) {
-      return NextResponse.json({ error: 'therapistId and a valid type are required' }, { status: 400 });
+  try {
+    const { type, label, sessionId, count } = await request.json();
+
+    if (!ALLOWED_TYPES.includes(type)) {
+      return NextResponse.json({ error: 'A valid type is required' }, { status: 400 });
     }
 
-    // Ignore unknown therapists rather than erroring (logging must never break UX).
-    const therapist = await prisma.profileTherapist.findUnique({ where: { id: therapistId }, select: { id: true } });
-    if (!therapist) {
-      return NextResponse.json({ ok: false });
+    if (sessionId) {
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { therapistId: true },
+      });
+      if (!session || session.therapistId !== therapistId) {
+        return notFound('Session');
+      }
     }
 
     const n = Number(count);

@@ -16,12 +16,18 @@ const generateSessionReport = vi.fn()
 vi.mock('@/lib/report/generate', () => ({ generateSessionReport }))
 vi.mock('@/lib/report/session-data', () => ({ getReportStats: vi.fn() }))
 
-const { POST, PATCH } = await import('../route')
+const { GET, POST, PATCH } = await import('../route')
 
-const USERS: Record<string, { id: string; role: string; therapist: { id: string } | null }> = {
+const USERS: Record<
+  string,
+  { id: string; role: string; therapist: { id: string } | null; client?: { id: string } | null }
+> = {
   'uid-a': { id: 'uid-a', role: 'THERAPIST', therapist: { id: 'therapist-a' } },
   'uid-b': { id: 'uid-b', role: 'THERAPIST', therapist: { id: 'therapist-b' } },
   'uid-client': { id: 'uid-client', role: 'CLIENT', therapist: null },
+  // Clients with a profile, for GET (which both parties of a session may use).
+  'uid-client-1': { id: 'uid-client-1', role: 'CLIENT', therapist: null, client: { id: 'client-1' } },
+  'uid-client-2': { id: 'uid-client-2', role: 'CLIENT', therapist: null, client: { id: 'client-2' } },
 }
 const SESSION_A = {
   id: 'session-a',
@@ -109,5 +115,47 @@ describe('PATCH /api/session-report authorization', () => {
     const res = await PATCH(req('PATCH', { sessionId: 'session-a', content: 'x' }, 'token-uid-a'))
     expect(res.status).toBe(200)
     expect(prisma.sessionReport.update).toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/session-report authorization', () => {
+  const get = (sessionId: string, token?: string) =>
+    GET(
+      new Request(`http://localhost/api/session-report?sessionId=${sessionId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      }) as any
+    )
+
+  beforeEach(() => {
+    prisma.sessionReport.findUnique.mockResolvedValue({ id: 'r1', sessionId: 'session-a', content: 'c' })
+  })
+
+  it('401 without a token', async () => {
+    expect((await get('session-a')).status).toBe(401)
+    expect(prisma.sessionReport.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('the session\'s therapist reads the report', async () => {
+    const res = await get('session-a', 'token-uid-a')
+    expect(res.status).toBe(200)
+    expect((await res.json()).report).toMatchObject({ id: 'r1' })
+  })
+
+  it('the session\'s own client reads the report (current behaviour kept)', async () => {
+    expect((await get('session-a', 'token-uid-client-1')).status).toBe(200)
+  })
+
+  it('404 for a different therapist — report never loaded', async () => {
+    expect((await get('session-a', 'token-uid-b')).status).toBe(404)
+    expect(prisma.sessionReport.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('404 for a different client — report never loaded', async () => {
+    expect((await get('session-a', 'token-uid-client-2')).status).toBe(404)
+    expect(prisma.sessionReport.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('same 404 for a session that does not exist', async () => {
+    expect((await get('nope', 'token-uid-a')).status).toBe(404)
   })
 })

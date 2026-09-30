@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireTherapist } from '@/lib/progressAuth';
+import { notFound, therapistHasClient } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,9 @@ export async function GET(request: Request) {
 
     if (!clientId) {
       return NextResponse.json({ error: 'clientId is required' }, { status: 400 });
+    }
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
     }
 
     const metrics = await prisma.progressMetric.findMany({
@@ -69,9 +73,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'value must be a number' }, { status: 400 });
     }
 
-    const client = await prisma.profileClient.findUnique({ where: { id: clientId } });
-    if (!client) {
-      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    // Only this therapist's own client, and only a session between the two.
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
+    }
+    if (sessionId) {
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { therapistId: true, clientId: true },
+      });
+      if (!session || session.therapistId !== auth.therapist.id || session.clientId !== clientId) {
+        return notFound('Session');
+      }
     }
 
     const metric = await prisma.progressMetric.create({

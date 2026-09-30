@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import { authFetch } from '@/lib/progressApi';
 
 interface SessionData {
   id: string;
@@ -34,7 +35,7 @@ export default function ProgressPage() {
     if (!profile) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/sessions?clientId=${profile.id}`);
+      const res = await authFetch('/api/sessions');
       if (res.ok) { const d = await res.json(); setSessions(d.sessions || []); }
     } catch (err) { console.error(err); }
     setLoading(false);

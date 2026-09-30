@@ -3,6 +3,8 @@
 // Session / Booking / ProfileClient rows — there are no extra schema fields for
 // status, duration or session numbers, so they are computed.
 
+import { authFetch } from '@/lib/progressApi';
+
 export type SessionStatus = 'SCHEDULED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
 export interface PracticeClient {
@@ -388,14 +390,14 @@ export async function createSession(
   duration?: number
 ): Promise<PracticeSession> {
   const data = await jsonOrThrow(
-    await fetch('/api/sessions', {
+    await authFetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ therapistId, clientId, scheduledAt: when.toISOString() }),
     })
   );
   if (duration) {
-    await fetch('/api/bookings', {
+    await authFetch('/api/bookings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ therapistId, clientId, dateTime: when.toISOString(), duration }),
@@ -406,7 +408,7 @@ export async function createSession(
 
 export async function updateSchedule(sessionId: string, action: 'cancel' | 'reschedule', scheduledAt?: Date) {
   const data = await jsonOrThrow(
-    await fetch(`/api/sessions/${sessionId}`, {
+    await authFetch(`/api/sessions/${sessionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, scheduledAt: scheduledAt?.toISOString() }),

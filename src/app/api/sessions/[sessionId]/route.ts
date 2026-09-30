@@ -1,19 +1,27 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { provisionSessionDocs } from '@/lib/session-provisioning';
+import { requireUser } from '@/lib/progressAuth';
+import { isParty, notFound } from '@/lib/ownership';
+
+// Both routes: only the session's own therapist or own client (from the ID
+// token). Anyone else gets the same 404 as a session that doesn't exist.
 
 // GET /api/sessions/[sessionId] — fetch a single session (with client + therapist).
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { sessionId: string } }
 ) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const session = await prisma.session.findUnique({
       where: { id: params.sessionId },
       include: { client: true, therapist: true },
     });
-    if (!session) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    if (!session || !isParty(auth, session)) {
+      return notFound('Session');
     }
     return NextResponse.json({ session });
   } catch (error: any) {
@@ -31,14 +39,17 @@ export async function PATCH(
   request: Request,
   { params }: { params: { sessionId: string } }
 ) {
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const { action, scheduledAt } = await request.json();
 
     const existing = await prisma.session.findUnique({
       where: { id: params.sessionId },
     });
-    if (!existing) {
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    if (!existing || !isParty(auth, existing)) {
+      return notFound('Session');
     }
 
     const now = new Date();

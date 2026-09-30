@@ -27,11 +27,14 @@
 //    A chronological list of ProgressMetric entries, used by the frontend
 //    line chart. Empty array if no metrics have been logged yet.
 
-export async function getClientMetrics(prisma, clientId) {
+// `scope` narrows every query, e.g. { therapistId } so a therapist only ever
+// sees their own sessions and metrics for this client — never another
+// therapist's. The controller decides the scope from the verified caller.
+export async function getClientMetrics(prisma, clientId, scope = {}) {
   const now = new Date();
 
   const sessions = await prisma.session.findMany({
-    where: { clientId },
+    where: { clientId, ...scope },
     orderBy: { scheduledAt: 'asc' },
   });
 
@@ -53,7 +56,7 @@ export async function getClientMetrics(prisma, clientId) {
   let history = [];
   try {
     const metrics = await prisma.progressMetric.findMany({
-      where: { clientId },
+      where: { clientId, ...scope },
       orderBy: { recordedAt: 'asc' },
     });
     if (metrics.length > 0) {

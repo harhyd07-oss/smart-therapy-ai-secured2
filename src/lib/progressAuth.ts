@@ -71,6 +71,44 @@ export async function requireTherapist(request: Request) {
 }
 
 /**
+ * Verifies the caller's Firebase ID token and resolves them to their
+ * therapist OR client profile — for routes both parties legitimately use
+ * (their sessions, bookings, session reports).
+ *
+ * Exactly one of `therapist` / `client` is set. Identity comes only from the
+ * token; callers must still check the resource belongs to that profile (see
+ * src/lib/ownership.ts).
+ *
+ *   const auth = await requireUser(request);
+ *   if (!auth.ok) return auth.response;
+ *   const { therapist, client } = auth;
+ */
+export async function requireUser(request: Request) {
+  const verified = await verifyBearer(request);
+  if (!verified.ok) return verified;
+
+  const user = await prisma.user.findUnique({
+    where: { id: verified.uid },
+    include: { therapist: true, client: true },
+  });
+
+  const therapist = user?.role === 'THERAPIST' ? user.therapist ?? null : null;
+  const client = user?.role === 'CLIENT' ? user.client ?? null : null;
+
+  if (!therapist && !client) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { error: 'Only therapists and clients with a profile may access this resource' },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return { ok: true as const, uid: verified.uid, therapist, client };
+}
+
+/**
  * Verifies the caller's Firebase ID token, then confirms the corresponding
  * user has the ADMIN role in the database.
  *

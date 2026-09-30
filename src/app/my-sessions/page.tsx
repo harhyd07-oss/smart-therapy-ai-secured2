@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Play, ArrowRight, FileText, ChevronDown } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import SessionReportView from '@/components/report/SessionReportView';
+import { authFetch } from '@/lib/progressApi';
 
 interface SessionData {
   id: string;
@@ -50,7 +51,7 @@ export default function MySessionsPage() {
     setOpenReportId(sessionId);
     setReportLoading(sessionId);
     try {
-      const res = await fetch(`/api/session-report?sessionId=${sessionId}`);
+      const res = await authFetch(`/api/session-report?sessionId=${sessionId}`);
       const data = res.ok ? await res.json() : null;
       setReports((prev) => ({ ...prev, [sessionId]: data?.report ?? null }));
     } catch (err) {
@@ -65,7 +66,7 @@ export default function MySessionsPage() {
     if (!profile) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/sessions?clientId=${profile.id}`);
+      const res = await authFetch('/api/sessions');
       if (res.ok) { const d = await res.json(); setSessions(d.sessions || []); }
     } catch (err) { console.error(err); }
     setLoading(false);

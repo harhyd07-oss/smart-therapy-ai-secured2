@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireTherapist } from '@/lib/progressAuth';
+import { notFound, therapistHasClient } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export async function GET(request: Request) {
     const clientId = searchParams.get('clientId');
     if (!clientId) {
       return NextResponse.json({ error: 'clientId is required' }, { status: 400 });
+    }
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
     }
 
     const reports = await prisma.progressReport.findMany({
@@ -48,9 +52,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const client = await prisma.profileClient.findUnique({ where: { id: clientId } });
-    if (!client) {
-      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    if (!(await therapistHasClient(auth.therapist.id, clientId))) {
+      return notFound('Client');
     }
 
     const start = new Date(periodStart);

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireTherapist } from '@/lib/progressAuth';
+import { notFound } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,11 +16,9 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   try {
     const { id } = params;
     const existing = await prisma.progressMetric.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: 'Progress metric not found' }, { status: 404 });
-    }
-    if (existing.therapistId !== auth.therapist.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    // Another therapist's metric is indistinguishable from a missing one.
+    if (!existing || existing.therapistId !== auth.therapist.id) {
+      return notFound('Progress metric');
     }
 
     const body = await request.json();
@@ -55,11 +54,8 @@ export async function DELETE(request: Request, { params }: { params: { id: strin
   try {
     const { id } = params;
     const existing = await prisma.progressMetric.findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: 'Progress metric not found' }, { status: 404 });
-    }
-    if (existing.therapistId !== auth.therapist.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!existing || existing.therapistId !== auth.therapist.id) {
+      return notFound('Progress metric');
     }
 
     await prisma.progressMetric.delete({ where: { id } });

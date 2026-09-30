@@ -1,17 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireTherapist, requireUser } from '@/lib/progressAuth';
+import { notFound, therapistHasClient } from '@/lib/ownership';
 
 export const dynamic = 'force-dynamic';
 
+// GET /api/bookings — the signed-in caller's own bookings (therapist or
+// client, from the ID token). Legacy ?therapistId= / ?clientId= are ignored.
 export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const therapistId = searchParams.get('therapistId');
-    const clientId = searchParams.get('clientId');
+  const auth = await requireUser(request);
+  if (!auth.ok) return auth.response;
 
-    if (therapistId) {
+  try {
+    if (auth.therapist) {
       const bookings = await prisma.booking.findMany({
-        where: { therapistId },
+        where: { therapistId: auth.therapist.id },
         include: {
           client: true,
         },
@@ -20,26 +23,32 @@ export async function GET(request: Request) {
       return NextResponse.json({ bookings });
     }
 
-    if (clientId) {
-      const bookings = await prisma.booking.findMany({
-        where: { clientId },
-        include: {
-          therapist: true,
-        },
-        orderBy: { dateTime: 'asc' },
-      });
-      return NextResponse.json({ bookings });
-    }
-
-    return NextResponse.json({ error: 'Missing filter parameter' }, { status: 400 });
+    const bookings = await prisma.booking.findMany({
+      where: { clientId: auth.client!.id },
+      include: {
+        therapist: true,
+      },
+      orderBy: { dateTime: 'asc' },
+    });
+    return NextResponse.json({ bookings });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
+// POST /api/bookings — the signed-in therapist books one of THEIR clients.
+// A body therapistId is ignored; an unlinked client is a 404.
 export async function POST(request: Request) {
+  const auth = await requireTherapist(request);
+  if (!auth.ok) return auth.response;
+  const therapistId = auth.therapist.id;
+
   try {
-    const { therapistId, clientId, dateTime, duration } = await request.json();
+    const { clientId, dateTime, duration } = await request.json();
+
+    if (!clientId || !(await therapistHasClient(therapistId, clientId))) {
+      return notFound('Client');
+    }
 
     const booking = await prisma.booking.create({
       data: {
