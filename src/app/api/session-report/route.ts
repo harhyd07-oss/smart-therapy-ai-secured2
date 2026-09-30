@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { generateSessionReport } from '@/lib/report/generate'
 import { getReportStats } from '@/lib/report/session-data'
+import { requireTherapist } from '@/lib/progressAuth'
 
 function ageFrom(dob: Date | null | undefined): number | undefined {
   if (!dob) return undefined
@@ -24,8 +25,14 @@ export async function GET(req: NextRequest) {
 }
 
 // Generate (or regenerate) the report for a session, then persist it.
+// Therapist-only: the report is built from the therapist's private notes.
+// Identity comes from the verified token; another therapist's session is a
+// 404, the same as a session that doesn't exist.
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireTherapist(req)
+    if (!auth.ok) return auth.response
+
     const { sessionId } = await req.json()
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId is required' }, { status: 400 })
@@ -35,7 +42,7 @@ export async function POST(req: NextRequest) {
       where: { id: sessionId },
       include: { client: true },
     })
-    if (!session) {
+    if (!session || session.therapistId !== auth.therapist.id) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
@@ -83,15 +90,25 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Save the therapist's edits to the report body.
+// Save the therapist's edits to the report body. Same ownership check as POST.
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireTherapist(req)
+    if (!auth.ok) return auth.response
+
     const { sessionId, content } = await req.json()
     if (!sessionId || typeof content !== 'string') {
       return NextResponse.json(
         { error: 'sessionId and content are required' },
         { status: 400 }
       )
+    }
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { therapistId: true },
+    })
+    if (!session || session.therapistId !== auth.therapist.id) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
     const report = await prisma.sessionReport.update({
       where: { sessionId },

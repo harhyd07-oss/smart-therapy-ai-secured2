@@ -5,9 +5,14 @@
  *   npm run test:rules
  *
  * Covers every collection the app touches (liveSessions, sessions,
- * sessions/rawSessionLog, moduleStates, patients) plus the default-deny
- * catch-all, from the perspective of each actor: the therapist and client of a
- * session, an unrelated authenticated user, and an anonymous visitor.
+ * sessions/private/therapist, sessions/rawSessionLog, moduleStates, patients)
+ * plus the default-deny catch-all, from the perspective of each actor: the
+ * therapist and client of a session, a different (real) therapist, an
+ * unrelated authenticated user, and an anonymous visitor.
+ *
+ * Identity is the verified token (`authenticatedContext(uid, claims)`); the
+ * "claims the seat in the data" cases show a uid written into a document
+ * never stands in for it.
  *
  * The single most important assertions are the OUTSIDER cases. Under the old
  * catch-all rule (`allow read, write: if request.auth != null`) every one of
@@ -31,6 +36,11 @@ const SESSION = '11111111-2222-4333-8444-555555555555'
 const THERAPIST = 'uid-therapist'
 const CLIENT = 'uid-client'
 const OUTSIDER = 'uid-outsider'
+
+// A second, fully legitimate session: OUTSIDER is the therapist of CLIENT_B.
+// Proves that being a real, seated therapist SOMEWHERE grants nothing here.
+const SESSION_B = '66666666-7777-4888-8999-000000000000'
+const CLIENT_B = 'uid-client-b'
 
 let testEnv: RulesTestEnvironment
 
@@ -57,12 +67,27 @@ beforeEach(async () => {
     await setDoc(doc(db, 'liveSessions', SESSION), {
       sessionId: SESSION,
       allowedUids: [THERAPIST, CLIENT],
+      therapistUid: THERAPIST,
+      clientUid: CLIENT,
       activeModuleId: null,
       participants: {},
     })
     await setDoc(doc(db, 'sessions', SESSION), { sessionId: SESSION, aiConsent: {} })
+    await setDoc(doc(db, 'sessions', SESSION, 'private', 'therapist'), {
+      therapistNotes: [{ content: 'seen anxious at start', timestamp: '2026-01-01T10:00:00Z' }],
+      aiInsight: { summary: 's', riskFlag: true, riskDetail: 'mentioned self-harm' },
+    })
     await setDoc(doc(db, 'moduleStates', `${SESSION}_worry-vault`), { state: {} })
-    await setDoc(doc(db, 'patients', CLIENT), { quests: [] })
+    await setDoc(doc(db, 'patients', CLIENT), { quests: [], therapistUids: [THERAPIST] })
+
+    await setDoc(doc(db, 'liveSessions', SESSION_B), {
+      sessionId: SESSION_B,
+      allowedUids: [OUTSIDER, CLIENT_B],
+      therapistUid: OUTSIDER,
+      clientUid: CLIENT_B,
+    })
+    await setDoc(doc(db, 'sessions', SESSION_B), { sessionId: SESSION_B, aiConsent: {} })
+    await setDoc(doc(db, 'patients', CLIENT_B), { quests: [], therapistUids: [OUTSIDER] })
   })
 })
 
@@ -72,6 +97,7 @@ const clientDb = () =>
   testEnv.authenticatedContext(CLIENT, { role: 'CLIENT' }).firestore()
 const outsiderDb = () =>
   testEnv.authenticatedContext(OUTSIDER, { role: 'CLIENT' }).firestore()
+// The therapist of SESSION_B / CLIENT_B — a different therapist from ours.
 const outsiderTherapistDb = () =>
   testEnv.authenticatedContext(OUTSIDER, { role: 'THERAPIST' }).firestore()
 const anonDb = () => testEnv.unauthenticatedContext().firestore()
@@ -134,6 +160,15 @@ describe('liveSessions', () => {
     await assertFails(deleteDoc(doc(therapistDb(), 'liveSessions', SESSION)))
   })
 
+  it('DENIES a participant moving themselves into the therapist seat', async () => {
+    await assertFails(
+      updateDoc(doc(clientDb(), 'liveSessions', SESSION), { therapistUid: CLIENT })
+    )
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'liveSessions', SESSION), { clientUid: THERAPIST })
+    )
+  })
+
   it('DENIES access when the room has no allowedUids (fails closed)', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), 'liveSessions', 'legacy'), { sessionId: 'legacy' })
@@ -156,16 +191,15 @@ describe('sessions', () => {
     await assertFails(getDoc(doc(outsiderTherapistDb(), 'sessions', SESSION)))
   })
 
-  it('lets a participant record consent', async () => {
-    await assertSucceeds(
-      updateDoc(doc(clientDb(), 'sessions', SESSION), { 'aiConsent.client': true })
-    )
-  })
-
   it('lets a participant append a transcript chunk', async () => {
     await assertSucceeds(
       updateDoc(doc(therapistDb(), 'sessions', SESSION), {
         transcript: [{ text: 'hello', speaker: 'therapist' }],
+      })
+    )
+    await assertSucceeds(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), {
+        moduleEvents: [{ module: 'worry-vault', type: 'open', detail: 'opened', timestamp: 1 }],
       })
     )
   })
@@ -178,6 +212,164 @@ describe('sessions', () => {
 
   it('DENIES deletion', async () => {
     await assertFails(deleteDoc(doc(therapistDb(), 'sessions', SESSION)))
+  })
+
+  it('DENIES any update from a member of a room with no seats (un-backfilled, fails closed)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore()
+      await setDoc(doc(db, 'liveSessions', 'unseated'), { allowedUids: [THERAPIST, CLIENT] })
+      await setDoc(doc(db, 'sessions', 'unseated'), { aiConsent: {} })
+    })
+    await assertFails(updateDoc(doc(therapistDb(), 'sessions', 'unseated'), { 'aiConsent.therapist': true }))
+    await assertFails(updateDoc(doc(clientDb(), 'sessions', 'unseated'), { 'aiConsent.client': true }))
+  })
+})
+
+describe('sessions — consent ownership', () => {
+  it('lets the therapist record their own consent', async () => {
+    await assertSucceeds(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), { 'aiConsent.therapist': true })
+    )
+  })
+
+  it('DENIES the therapist consenting on the client\'s behalf', async () => {
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), { 'aiConsent.client': true })
+    )
+  })
+
+  it('lets the client record their own consent', async () => {
+    await assertSucceeds(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), { 'aiConsent.client': true })
+    )
+  })
+
+  it('DENIES the client setting the therapist\'s consent', async () => {
+    await assertFails(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), { 'aiConsent.therapist': true })
+    )
+  })
+
+  it('DENIES smuggling the other party\'s consent into a legitimate update', async () => {
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), {
+        'aiConsent.therapist': true,
+        'aiConsent.client': true,
+      })
+    )
+    await assertFails(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), {
+        transcript: [{ text: 'hi', speaker: 'client' }],
+        'aiConsent.therapist': true,
+      })
+    )
+  })
+
+  it('DENIES the therapist withdrawing consent the client already gave', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'sessions', SESSION), { 'aiConsent.client': true })
+    })
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), { 'aiConsent.client': false })
+    )
+  })
+
+  it('DENIES replacing the whole aiConsent map to set both at once', async () => {
+    await assertFails(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), { aiConsent: { client: true, therapist: true } })
+    )
+  })
+
+  it('takes identity from the token, not from a claimed seat in the data', async () => {
+    // The client claims the therapist seat in the very write — still refused,
+    // because the rules read the seat from the server-written liveSessions doc.
+    await assertFails(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), {
+        therapistUid: CLIENT,
+        'aiConsent.therapist': true,
+      })
+    )
+  })
+})
+
+describe('sessions — therapist-only fields stay off the shared doc', () => {
+  it('DENIES the client writing a fake aiInsight onto the session', async () => {
+    await assertFails(
+      updateDoc(doc(clientDb(), 'sessions', SESSION), { aiInsight: { summary: 'forged' } })
+    )
+  })
+
+  it('DENIES the therapist writing notes onto the shared doc (they belong in private/)', async () => {
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), { therapistNotes: [{ content: 'x' }] })
+    )
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'sessions', SESSION), { riskDetail: 'x' })
+    )
+  })
+})
+
+describe('sessions/{id}/private/therapist — therapist-only data', () => {
+  const priv = (db: ReturnType<typeof therapistDb>) => doc(db, 'sessions', SESSION, 'private', 'therapist')
+  const note = { therapistNotes: [{ content: 'calmer after breathing', timestamp: 't' }] }
+
+  it('lets the session\'s therapist read notes and the AI insight', async () => {
+    await assertSucceeds(getDoc(priv(therapistDb())))
+  })
+
+  it('lets the session\'s therapist write notes', async () => {
+    await assertSucceeds(setDoc(priv(therapistDb()), note, { merge: true }))
+  })
+
+  it('lets the therapist create the private doc with their first note', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await deleteDoc(doc(ctx.firestore(), 'sessions', SESSION, 'private', 'therapist'))
+    })
+    await assertSucceeds(setDoc(priv(therapistDb()), note, { merge: true }))
+  })
+
+  it('DENIES the therapist forging the server-written AI insight or audit log', async () => {
+    await assertFails(setDoc(priv(therapistDb()), { aiInsight: { riskFlag: false } }, { merge: true }))
+    await assertFails(setDoc(priv(therapistDb()), { copilotEvents: [] }, { merge: true }))
+  })
+
+  it('DENIES the client reading therapist notes / risk detail', async () => {
+    await assertFails(getDoc(priv(clientDb())))
+  })
+
+  it('DENIES the client writing therapist notes', async () => {
+    await assertFails(setDoc(priv(clientDb()), note, { merge: true }))
+  })
+
+  it('DENIES a different therapist reading or writing', async () => {
+    await assertFails(getDoc(priv(outsiderTherapistDb())))
+    await assertFails(setDoc(priv(outsiderTherapistDb()), note, { merge: true }))
+  })
+
+  it('DENIES an anonymous visitor', async () => {
+    await assertFails(getDoc(priv(anonDb())))
+  })
+
+  it('DENIES the client even when the written data claims the therapist seat', async () => {
+    await assertFails(
+      setDoc(priv(clientDb()), { ...note, therapistUid: CLIENT }, { merge: true })
+    )
+  })
+
+  it('DENIES any other doc under private/', async () => {
+    await assertFails(getDoc(doc(clientDb(), 'sessions', SESSION, 'private', 'client')))
+    await assertFails(setDoc(doc(clientDb(), 'sessions', SESSION, 'private', 'client'), { a: 1 }))
+  })
+
+  it('DENIES deletion, even by the therapist', async () => {
+    await assertFails(deleteDoc(priv(therapistDb())))
+  })
+
+  it('DENIES the therapist when the room has no seats (un-backfilled, fails closed)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'liveSessions', 'unseated'), { allowedUids: [THERAPIST, CLIENT] })
+    })
+    await assertFails(getDoc(doc(therapistDb(), 'sessions', 'unseated', 'private', 'therapist')))
   })
 })
 
@@ -298,11 +490,35 @@ describe('patients', () => {
     await assertSucceeds(getDoc(doc(clientDb(), 'patients', CLIENT)))
   })
 
-  it('lets a therapist read and assign quests', async () => {
+  it('lets the patient update their own quests', async () => {
+    await assertSucceeds(
+      setDoc(doc(clientDb(), 'patients', CLIENT), { quests: [{ id: 'q2' }] }, { merge: true })
+    )
+  })
+
+  it('lets the patient\'s own therapist read quests', async () => {
     await assertSucceeds(getDoc(doc(therapistDb(), 'patients', CLIENT)))
+  })
+
+  it('lets the patient\'s own therapist assign quests', async () => {
     await assertSucceeds(
       setDoc(doc(therapistDb(), 'patients', CLIENT), { quests: [{ id: 'q1' }] }, { merge: true })
     )
+  })
+
+  it('DENIES a different therapist reading another therapist\'s patient', async () => {
+    // OUTSIDER holds a THERAPIST claim AND is the real therapist of CLIENT_B.
+    await assertFails(getDoc(doc(outsiderTherapistDb(), 'patients', CLIENT)))
+  })
+
+  it('DENIES a different therapist writing another therapist\'s patient', async () => {
+    await assertFails(
+      setDoc(doc(outsiderTherapistDb(), 'patients', CLIENT), { quests: [{ id: 'x' }] }, { merge: true })
+    )
+  })
+
+  it('still lets that other therapist use their OWN patient', async () => {
+    await assertSucceeds(getDoc(doc(outsiderTherapistDb(), 'patients', CLIENT_B)))
   })
 
   it('DENIES another patient reading someone else\'s quests', async () => {
@@ -313,11 +529,52 @@ describe('patients', () => {
     await assertFails(getDoc(doc(anonDb(), 'patients', CLIENT)))
   })
 
-  it('DENIES a user with no role claim at all (pre-backfill account)', async () => {
-    // Documents the backfill dependency: without the claim, a therapist is
-    // treated as an unrelated user here.
+  it('DENIES a user with no role claim who is not in therapistUids', async () => {
     const noClaim = testEnv.authenticatedContext('uid-noclaim').firestore()
     await assertFails(getDoc(doc(noClaim, 'patients', CLIENT)))
+  })
+
+  it('DENIES a therapist adding themselves to therapistUids (no self-issued access)', async () => {
+    await assertFails(
+      setDoc(
+        doc(outsiderTherapistDb(), 'patients', CLIENT),
+        { therapistUids: [THERAPIST, OUTSIDER] },
+        { merge: true }
+      )
+    )
+  })
+
+  it('DENIES the patient editing therapistUids', async () => {
+    await assertFails(
+      updateDoc(doc(clientDb(), 'patients', CLIENT), { therapistUids: [THERAPIST, OUTSIDER] })
+    )
+    await assertFails(updateDoc(doc(clientDb(), 'patients', CLIENT), { therapistUids: [] }))
+  })
+
+  it('DENIES the own therapist editing therapistUids', async () => {
+    await assertFails(
+      updateDoc(doc(therapistDb(), 'patients', CLIENT), { therapistUids: [THERAPIST, OUTSIDER] })
+    )
+  })
+
+  it('lets a patient create their own doc, but never with therapistUids', async () => {
+    const newPatient = testEnv.authenticatedContext('uid-new', { role: 'CLIENT' }).firestore()
+    await assertSucceeds(setDoc(doc(newPatient, 'patients', 'uid-new'), { quests: [] }))
+    await testEnv.clearFirestore()
+    await assertFails(
+      setDoc(doc(newPatient, 'patients', 'uid-new'), { quests: [], therapistUids: [OUTSIDER] })
+    )
+  })
+
+  it('DENIES a therapist creating a patient doc (the server seeds it)', async () => {
+    await assertFails(setDoc(doc(therapistDb(), 'patients', 'uid-unseen'), { quests: [] }))
+  })
+
+  it('DENIES a therapist when the patient doc has no therapistUids (fails closed)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'patients', 'uid-legacy'), { quests: [] })
+    })
+    await assertFails(getDoc(doc(therapistDb(), 'patients', 'uid-legacy')))
   })
 
   it('DENIES deletion', async () => {

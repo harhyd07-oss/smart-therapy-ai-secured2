@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { doc, onSnapshot, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, arrayUnion, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import {
   CheckCircle2, Bookmark, Star, Flag, MoreHorizontal,
@@ -56,12 +56,11 @@ const fmtOffset = (ms: number) => {
 
 // AI Notes sidebar panel: session timeline + note editor + AI suggestions.
 //
-// All data comes from the `sessions/{sessionId}` doc that already backs the
-// session room — `transcript` (Deepgram chunks written by the RAG pipeline),
-// `moduleEvents` (module activity log) and `therapistNotes` (the existing
-// in-call notes array the end-of-session report reads). Saving appends to
-// `therapistNotes` exactly as the previous NotesPanel did — same field, same
-// shape, so the report generator is unaffected.
+// `transcript` (Deepgram chunks written by the RAG pipeline) and `moduleEvents`
+// (module activity log) come from the shared `sessions/{sessionId}` doc.
+// `therapistNotes` (the in-call notes array the end-of-session report reads)
+// lives in the therapist-only `sessions/{sessionId}/private/therapist` doc so
+// the client can't read it. Saving appends there — same field, same shape.
 export default function AINotesPanel({
   sessionId,
   sessionStartedAt,
@@ -90,9 +89,19 @@ export default function AINotesPanel({
       const d = snap.data()
       if (Array.isArray(d.transcript)) setTranscript(d.transcript as TranscriptEntry[])
       if (Array.isArray(d.moduleEvents)) setModuleEvents(d.moduleEvents as ModuleEventEntry[])
-      if (Array.isArray(d.therapistNotes)) setSavedNotes(d.therapistNotes as SavedNote[])
     })
-    return () => unsub()
+    const unsubNotes = onSnapshot(
+      doc(db, 'sessions', sessionId, 'private', 'therapist'),
+      (snap) => {
+        const notes = snap.data()?.therapistNotes
+        if (Array.isArray(notes)) setSavedNotes(notes as SavedNote[])
+      },
+      () => {}
+    )
+    return () => {
+      unsub()
+      unsubNotes()
+    }
   }, [sessionId])
 
   // Key moments, not a flat transcript: longer client utterances read as the
@@ -130,10 +139,15 @@ export default function AINotesPanel({
     if (!text.trim() || saving) return
     setSaving(true)
     try {
-      await updateDoc(doc(db, 'sessions', sessionId), {
-        therapistNotes: arrayUnion({ content: text.trim(), timestamp: new Date().toISOString() }),
-        therapistNotesLastUpdated: serverTimestamp(),
-      })
+      // setDoc+merge: creates the private doc on the first note.
+      await setDoc(
+        doc(db, 'sessions', sessionId, 'private', 'therapist'),
+        {
+          therapistNotes: arrayUnion({ content: text.trim(), timestamp: new Date().toISOString() }),
+          therapistNotesLastUpdated: serverTimestamp(),
+        },
+        { merge: true }
+      )
       setSavedAt(Date.now())
       setText('')
     } catch {}

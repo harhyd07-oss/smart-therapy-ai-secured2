@@ -1,14 +1,21 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { runAnalysis } from '@/lib/rag/analysis'
-import { checkAIConsent, getSessionTranscript, appendCopilotEvent } from '@/lib/rag/transcript-store'
+import { checkAIConsent, getSessionTranscript, appendCopilotEvent, saveAIInsight } from '@/lib/rag/transcript-store'
+import { requireTherapist } from '@/lib/progressAuth'
 import type { ClientProfile } from '@/lib/rag/retrieval'
 import type { AIInsight } from '@/lib/rag/types'
 
 export async function POST(request: Request) {
   try {
+    // Identity comes from the verified Firebase token only. Any therapistId in
+    // the body is ignored.
+    const auth = await requireTherapist(request)
+    if (!auth.ok) return auth.response
+    const therapistId = auth.uid
+
     const body = await request.json()
-    const { sessionId, therapistId, clientProfile, transcriptWindowMinutes } = body
+    const { sessionId, clientProfile, transcriptWindowMinutes } = body
 
     if (!sessionId || typeof sessionId !== 'string') {
       return NextResponse.json(
@@ -17,11 +24,14 @@ export async function POST(request: Request) {
       )
     }
 
-    if (!therapistId || typeof therapistId !== 'string') {
-      return NextResponse.json(
-        { error: 'therapistId is required and must be a string' },
-        { status: 400 }
-      )
+    // Only the session's own therapist. 404 (not 403) so another therapist
+    // can't probe which session ids exist.
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { therapistId: true },
+    })
+    if (!session || session.therapistId !== auth.therapist.id) {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
     if (!clientProfile || typeof clientProfile !== 'object') {
@@ -85,27 +95,8 @@ export async function POST(request: Request) {
       transcriptWindowMinutes: transcriptWindowMinutes ?? 5,
     })
 
-    const { getFirestore } = await import('firebase-admin/firestore')
-    const { initializeApp, getApps, cert } = await import('firebase-admin/app')
-
-    if (!getApps().length) {
-      initializeApp({
-        credential: cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        }),
-      })
-    }
-
-    const db = getFirestore()
-    await db.collection('sessions').doc(sessionId).set(
-      {
-        aiInsight: insight,
-        aiInsightGeneratedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    )
+    // Therapist-only: sessions/{id}/private/therapist, never the shared doc.
+    await saveAIInsight(sessionId, insight)
 
     // Lightweight append-only audit trail of every copilot suggestion. Survives
     // alongside the transcript so the end-of-session report can reference it
@@ -119,13 +110,9 @@ export async function POST(request: Request) {
       riskDetail: insight.riskDetail ?? '',
     })
 
-    // Log AI analysis as a usage event for the admin dashboard (therapistId here
-    // is the Firebase uid; resolve to the therapist profile). Never block on this.
+    // Log AI analysis as a usage event for the admin dashboard. Never block on this.
     try {
-      const t = await prisma.profileTherapist.findUnique({ where: { userId: therapistId }, select: { id: true } })
-      if (t) {
-        await prisma.usageEvent.create({ data: { therapistId: t.id, sessionId, type: 'AI_ANALYSIS' } })
-      }
+      await prisma.usageEvent.create({ data: { therapistId: auth.therapist.id, sessionId, type: 'AI_ANALYSIS' } })
     } catch (e) {
       console.error('Failed to log AI usage event:', e)
     }

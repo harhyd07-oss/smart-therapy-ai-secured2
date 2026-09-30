@@ -60,6 +60,11 @@ export async function provisionSessionDocs(
   )
   if (allowedUids.length === 0) return null
 
+  // Who holds which seat. The rules use these (not role claims) to decide who
+  // may set which consent and who may read sessions/{id}/private/therapist.
+  const therapistUid = session.therapist.userId || null
+  const clientUid = session.client.userId || null
+
   const db = adminDb()
 
   const liveRef = db.collection('liveSessions').doc(sessionId)
@@ -71,6 +76,8 @@ export async function provisionSessionDocs(
     await liveRef.set({
       sessionId,
       allowedUids,
+      therapistUid,
+      clientUid,
       activeModuleId: null,
       therapistControl: false,
       participants: {},
@@ -85,8 +92,20 @@ export async function provisionSessionDocs(
     // the second participant joining must not kick the first out of a module.
     await liveRef.update({
       allowedUids,
+      therapistUid,
+      clientUid,
       'timestamps.updatedAt': FieldValue.serverTimestamp(),
     })
+  }
+
+  // Record the therapist on the patient's cross-session document so the rules
+  // can let THIS therapist (and no other) read and assign quests. arrayUnion:
+  // never drops another therapist who also treats this patient.
+  if (therapistUid && clientUid) {
+    await db
+      .collection('patients')
+      .doc(clientUid)
+      .set({ therapistUids: FieldValue.arrayUnion(therapistUid) }, { merge: true })
   }
 
   await db
@@ -95,7 +114,6 @@ export async function provisionSessionDocs(
     .set(
       {
         sessionId,
-        aiConsent: {},
         createdAt: new Date().toISOString(),
       },
       { merge: true }

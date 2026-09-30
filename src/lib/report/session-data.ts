@@ -66,15 +66,20 @@ export async function getReportStats(sessionId: string): Promise<unknown | null>
   }
 }
 
-// Everything the report needs lives on the single persistent `sessions/{id}`
-// Firestore doc: the (English) transcript, the in-module activity timeline, and
-// the therapist's in-call notes.
+// The report reads the (English) transcript and in-module activity timeline
+// from `sessions/{id}`, and the therapist's in-call notes from its
+// therapist-only `private/therapist` doc.
 export async function getReportInputs(sessionId: string): Promise<ReportInputs> {
-  const snap = await db.collection('sessions').doc(sessionId).get()
+  const sessionRef = db.collection('sessions').doc(sessionId)
+  const [snap, priv] = await Promise.all([
+    sessionRef.get(),
+    sessionRef.collection('private').doc('therapist').get(),
+  ])
   const d = snap.exists ? snap.data() ?? {} : {}
+  const p = priv.exists ? priv.data() ?? {} : {}
   return {
     transcript: Array.isArray(d.transcript) ? (d.transcript as TranscriptLine[]) : [],
     moduleEvents: Array.isArray(d.moduleEvents) ? (d.moduleEvents as ModuleEvent[]) : [],
-    therapistNotes: Array.isArray(d.therapistNotes) ? (d.therapistNotes as SessionNote[]) : [],
+    therapistNotes: Array.isArray(p.therapistNotes) ? (p.therapistNotes as SessionNote[]) : [],
   }
 }

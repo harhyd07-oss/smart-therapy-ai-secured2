@@ -22,6 +22,7 @@ import {
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import SessionReportView from '@/components/report/SessionReportView';
 import type { ReportStats } from '@/lib/report/stats';
+import { progressFetch } from '@/lib/progressApi';
 import { useNow, usePracticeData, useTherapistGuard } from '@/hooks/usePracticeData';
 import { useSessionActions } from '@/components/practice/useSessionActions';
 import {
@@ -199,13 +200,10 @@ export default function SessionsPage() {
   const generateReport = async (sessionId: string) => {
     setGenerating(true);
     try {
-      const res = await fetch('/api/session-report', {
+      const d = await progressFetch('/api/session-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId }),
       });
-      if (!res.ok) throw new Error();
-      const d = await res.json();
       setReport(d.report);
       setReportStats(d.stats ?? null);
       setEditing(false);
@@ -243,13 +241,10 @@ export default function SessionsPage() {
     if (!reportFor) return;
     setSavingReport(true);
     try {
-      const res = await fetch('/api/session-report', {
+      const d = await progressFetch('/api/session-report', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: reportFor.id, content: draft }),
       });
-      if (!res.ok) throw new Error();
-      const d = await res.json();
       setReport(d.report);
       setEditing(false);
       toast('Report saved');

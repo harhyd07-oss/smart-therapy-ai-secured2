@@ -5,7 +5,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useRouter } from 'next/navigation';
 import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
+import { progressFetch } from '@/lib/progressApi';
 import {
   Mic, MicOff, Camera, CameraOff, PhoneOff, Settings, Smile,
   Maximize2, Minimize2,
@@ -346,19 +347,32 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
         if (aiConsent[myKey] != null) {
           setShowConsentBanner(false);
         }
-
-        if (isTherapist && data?.aiInsight) {
-          setAiInsight(data.aiInsight);
-          // The floating insight bar used to pop itself open here; the AI
-          // Assistant panel now takes that role. Only surface it when nothing
-          // else is occupying the sidebar so it can't yank the therapist out of
-          // an open module or the whiteboard.
-          setActivePanel((current) => (current === null ? 'assistant' : current));
-        }
       }
     });
 
-    return () => unsub();
+    // aiInsight is therapist-only (sessions/{id}/private/therapist); the
+    // client is not allowed to read it and doesn't subscribe.
+    const unsubPrivate = isTherapist
+      ? onSnapshot(
+          doc(db, 'sessions', sessionId, 'private', 'therapist'),
+          (snap) => {
+            const insight = snap.data()?.aiInsight;
+            if (!insight) return;
+            setAiInsight(insight);
+            // The floating insight bar used to pop itself open here; the AI
+            // Assistant panel now takes that role. Only surface it when nothing
+            // else is occupying the sidebar so it can't yank the therapist out of
+            // an open module or the whiteboard.
+            setActivePanel((current) => (current === null ? 'assistant' : current));
+          },
+          () => {}
+        )
+      : null;
+
+    return () => {
+      unsub();
+      unsubPrivate?.();
+    };
   }, [sessionId, uid, isTherapist]);
 
   const handleModuleSwitch = async (moduleId: string) => {
@@ -387,12 +401,11 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     setAnalyseLoading(true);
     const clientParticipant = Object.values(participants).find((p) => p.role === 'client');
     try {
-      const res = await fetch('/api/ai-insight', {
+      // Authenticated: the route takes the therapist from the ID token.
+      await progressFetch('/api/ai-insight', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId,
-          therapistId: uid,
           // Route expects `clientProfile` (was `client` — the mismatch made the
           // copilot button 400 every time).
           clientProfile: {
@@ -401,14 +414,9 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
             age: 0,
             conditions: [],
             sessionNumber: 1,
-            therapistId: uid,
           },
         }),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Analysis failed');
-      }
       setAnalyseCooldown(true);
       setTimeout(() => setAnalyseCooldown(false), 30000);
       showToast('Analysis complete');
@@ -480,14 +488,20 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
     // in Firestore (the cleanup cron clears transcripts after 24h). `keepalive`
     // lets the request outlive the imminent redirect; the server route runs the
     // LLM generation to completion independently of this page.
+    //
+    // The ID token is fetched BEFORE firing so the keepalive request itself
+    // starts before the redirect below.
     if (isTherapist) {
       try {
-        fetch('/api/session-report', {
-          method: 'POST',
-          keepalive: true,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
-        });
+        const token = await auth.currentUser?.getIdToken();
+        if (token) {
+          fetch('/api/session-report', {
+            method: 'POST',
+            keepalive: true,
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ sessionId }),
+          });
+        }
       } catch {}
     }
     setActiveSessionId(null);

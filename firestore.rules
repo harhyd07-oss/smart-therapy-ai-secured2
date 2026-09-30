@@ -22,14 +22,14 @@ rules_version = '2';
 // modify `allowedUids`: if a client could write it, it would be self-issued
 // authorisation and the whole model would be circular.
 //
-// ── Roles ───────────────────────────────────────────────────────────────────
-// User roles also live in Postgres. They reach rules as a Firebase custom claim
-// (`request.auth.token.role`), minted server-side at profile creation and by
-// scripts/backfill-role-claims.mjs. A claim is only trustworthy because the
-// client cannot set it.
-//
-// NOTE: claims land in the ID token, so a user must refresh their token (a
-// re-login, or an hour's expiry) before a newly minted claim is visible.
+// ── Seats, not roles ────────────────────────────────────────────────────────
+// A role claim says someone is *a* therapist, not *this patient's* therapist.
+// So nothing here authorises on `request.auth.token.role`. Instead the server
+// mirrors the specific relationships from Postgres:
+//   liveSessions/{id}.therapistUid / clientUid — who holds which seat
+//   patients/{uid}.therapistUids                — who treats this patient
+// Un-backfilled documents lack these fields and fail closed; see
+// scripts/backfill-session-privacy.mjs.
 // ─────────────────────────────────────────────────────────────────────────────
 
 service cloud.firestore {
@@ -56,8 +56,30 @@ service cloud.firestore {
         && request.auth.uid in liveSessionData(sid).allowedUids;
     }
 
-    function hasRole(role) {
-      return signedIn() && request.auth.token.get('role', '') == role;
+    // Which member is which. `therapistUid` / `clientUid` sit beside
+    // allowedUids on liveSessions/{id} and are written by the same server-side
+    // provisioning, so they are as trustworthy as allowedUids. Missing on an
+    // un-backfilled room → '' → never equals a uid → fails closed.
+    function isSessionTherapist(sid) {
+      return isSessionMember(sid)
+        && liveSessionData(sid).get('therapistUid', '') == request.auth.uid;
+    }
+
+    function isSessionClient(sid) {
+      return isSessionMember(sid)
+        && liveSessionData(sid).get('clientUid', '') == request.auth.uid;
+    }
+
+    // Therapist-only fields. They live in sessions/{id}/private/therapist and
+    // must never be (re)introduced on the member-readable session document.
+    function therapistOnlyFields() {
+      return ['therapistNotes', 'therapistNotesLastUpdated', 'aiInsight', 'aiInsightGeneratedAt',
+              'riskDetail', 'copilotEvents', 'copilotEventsLastUpdated'];
+    }
+
+    function consentUnchanged(party) {
+      return request.resource.data.get('aiConsent', {}).get(party, null)
+        == resource.data.get('aiConsent', {}).get(party, null);
     }
 
     // ── liveSessions/{sessionId} ────────────────────────────────────────────
@@ -74,24 +96,57 @@ service cloud.firestore {
       allow create: if false;
       allow delete: if false;
 
-      // Members may update room state, but never the entitlement itself.
+      // Members may update room state, but never the entitlement itself or
+      // who holds which seat.
       allow update: if isSessionMember(sessionId)
-        && request.resource.data.allowedUids == resource.data.allowedUids;
+        && request.resource.data.allowedUids == resource.data.allowedUids
+        && request.resource.data.get('therapistUid', null) == resource.data.get('therapistUid', null)
+        && request.resource.data.get('clientUid', null) == resource.data.get('clientUid', null);
     }
 
     // ── sessions/{sessionId} ────────────────────────────────────────────────
-    // The durable session record: aiConsent, transcript[], aiInsight,
-    // moduleEvents[], therapistNotes[].
+    // The durable session record both members see: aiConsent, transcript[],
+    // moduleEvents[]. Therapist-only data is in private/therapist below.
     //
     // Authorised off the SAME allowedUids as the live room, so the two can
     // never disagree. Also provisioned server-side; the client only updates.
+    //
+    // Each party may change only its own consent: the therapist can never set
+    // aiConsent.client and the client can never set aiConsent.therapist. Who is
+    // who comes from the server-written seats, never from the request.
     match /sessions/{sessionId} {
       allow get, list: if isSessionMember(sessionId);
 
       allow create: if false;
       allow delete: if false;
 
-      allow update: if isSessionMember(sessionId);
+      allow update: if isSessionMember(sessionId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(therapistOnlyFields())
+        && (
+             (isSessionTherapist(sessionId) && consentUnchanged('client'))
+             ||
+             (isSessionClient(sessionId) && consentUnchanged('therapist'))
+           );
+
+      // ── private/therapist: therapist-only session data ───────────────────
+      // therapistNotes[], aiInsight (incl. riskDetail) and the copilotEvents[]
+      // audit log. Only the session's own therapist may read it; the client,
+      // other therapists and anonymous users are refused.
+      //
+      // The therapist writes notes only. aiInsight and copilotEvents are
+      // written by the server (Admin SDK) so the audit trail can't be forged.
+      match /private/{docId} {
+        allow get: if docId == 'therapist' && isSessionTherapist(sessionId);
+        allow list: if false;
+
+        allow create: if docId == 'therapist' && isSessionTherapist(sessionId)
+          && request.resource.data.keys().hasOnly(['therapistNotes', 'therapistNotesLastUpdated']);
+        allow update: if docId == 'therapist' && isSessionTherapist(sessionId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['therapistNotes', 'therapistNotesLastUpdated']);
+
+        allow delete: if false;
+      }
 
       // ── rawSessionLog: the session diary ─────────────────────────────────
       // Append-only time series of attention scores (and, once the deferred
@@ -136,19 +191,27 @@ service cloud.firestore {
     // Keyed by the patient's Firebase UID.
     //
     // Not session-scoped, so allowedUids cannot authorise it. The patient
-    // themselves always has access; therapists are permitted via role claim.
-    //
-    // KNOWN RESIDUAL GAP: this grants ANY therapist access to ANY patient's
-    // quests, not just their own patients. That is a large improvement on "any
-    // authenticated user", but it is not the end state. Closing it needs an
-    // explicit assignment list on the document (e.g. `therapistUids`), seeded
-    // server-side from Postgres the same way allowedUids is. Tracked as
-    // follow-up work; see SECURITY-RULES.md.
+    // themselves always has access. A therapist has access only if their uid
+    // is in `therapistUids`, which the server seeds from Postgres sessions
+    // (src/lib/session-provisioning.ts) exactly as it seeds allowedUids.
+    // Nobody may edit that list from the client — it would be self-issued
+    // authorisation. No list → no therapist access (fails closed).
     match /patients/{patientUid} {
-      allow get, list: if signedIn()
-        && (request.auth.uid == patientUid || hasRole('THERAPIST'));
-      allow create, update: if signedIn()
-        && (request.auth.uid == patientUid || hasRole('THERAPIST'));
+      allow get: if signedIn()
+        && (request.auth.uid == patientUid
+            || request.auth.uid in resource.data.get('therapistUids', []));
+      allow list: if false;
+
+      // Only the patient may create their own document, and without seats.
+      // Therapists never create it: the server does, with therapistUids set.
+      allow create: if signedIn() && request.auth.uid == patientUid
+        && !request.resource.data.keys().hasAny(['therapistUids']);
+
+      allow update: if signedIn()
+        && (request.auth.uid == patientUid
+            || request.auth.uid in resource.data.get('therapistUids', []))
+        && request.resource.data.get('therapistUids', []) == resource.data.get('therapistUids', []);
+
       allow delete: if false;
     }
 

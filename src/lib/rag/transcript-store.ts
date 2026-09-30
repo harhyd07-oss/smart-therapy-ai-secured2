@@ -14,6 +14,13 @@ if (!getApps().length) {
 
 const db = getFirestore()
 
+// Therapist-only session data (notes, aiInsight, copilotEvents). Kept off the
+// member-readable sessions/{id} doc; firestore.rules lets only the session's
+// therapist read it.
+function therapistPrivateRef(sessionId: string) {
+  return db.collection('sessions').doc(sessionId).collection('private').doc('therapist')
+}
+
 export async function appendTranscriptChunk(
   sessionId: string,
   chunk: TranscriptChunk
@@ -72,21 +79,25 @@ export interface SessionActivity {
   inCallNotes: string[]
 }
 
-// Pull the in-session activity timeline + in-call notes from the same persistent
-// `sessions/{id}` doc the transcript lives on. Feeds the copilot so suggestions
+// Pull the in-session activity timeline (from `sessions/{id}`) and the in-call
+// notes (from its private/therapist doc). Feeds the copilot so suggestions
 // account for what was actually DONE, not just what was said.
 export async function getSessionActivity(
   sessionId: string
 ): Promise<SessionActivity> {
-  const doc = await db.collection('sessions').doc(sessionId).get()
+  const [doc, priv] = await Promise.all([
+    db.collection('sessions').doc(sessionId).get(),
+    therapistPrivateRef(sessionId).get(),
+  ])
   const d = doc.exists ? doc.data() ?? {} : {}
+  const p = priv.exists ? priv.data() ?? {} : {}
   const moduleEvents = Array.isArray(d.moduleEvents)
     ? (d.moduleEvents as Array<{ detail?: unknown }>)
         .map(e => (typeof e?.detail === 'string' ? e.detail : ''))
         .filter(Boolean)
     : []
-  const inCallNotes = Array.isArray(d.therapistNotes)
-    ? (d.therapistNotes as Array<{ content?: unknown }>)
+  const inCallNotes = Array.isArray(p.therapistNotes)
+    ? (p.therapistNotes as Array<{ content?: unknown }>)
         .map(n => (typeof n?.content === 'string' ? n.content : ''))
         .filter(Boolean)
     : []
@@ -102,16 +113,28 @@ export interface CopilotEventLog {
   riskDetail: string
 }
 
+// The latest copilot insight (including riskDetail), for the therapist's panel.
+export async function saveAIInsight(sessionId: string, insight: unknown): Promise<void> {
+  await therapistPrivateRef(sessionId).set(
+    {
+      aiInsight: insight,
+      aiInsightGeneratedAt: new Date().toISOString(),
+    },
+    { merge: true }
+  )
+}
+
 // Lightweight audit trail of every copilot suggestion the therapist requested.
-// Append-only on the session doc so it survives alongside the transcript and can
-// later feed the end-of-session report ("copilot flagged a concern at 14:32").
+// Append-only on the therapist-private doc so it survives alongside the
+// transcript and can later feed the end-of-session report ("copilot flagged a
+// concern at 14:32"). Carries riskDetail, so the client must never see it.
 // Fire-and-forget: a logging failure must never break the live copilot.
 export async function appendCopilotEvent(
   sessionId: string,
   event: CopilotEventLog
 ): Promise<void> {
   try {
-    await db.collection('sessions').doc(sessionId).set(
+    await therapistPrivateRef(sessionId).set(
       {
         copilotEvents: FieldValue.arrayUnion(event),
         copilotEventsLastUpdated: FieldValue.serverTimestamp(),

@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { doc, updateDoc, arrayUnion, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, arrayUnion, onSnapshot, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { X } from 'lucide-react'
 
@@ -21,16 +21,19 @@ export default function NotesPanel({ open, onClose, sessionId }: NotesPanelProps
   const [saved, setSaved] = useState(false)
   const [notes, setNotes] = useState<SessionNote[]>([])
 
-  // Keep every note this session: append to the persistent `sessions` doc so
-  // the end-of-session report can read them (optional input — therapists don't
-  // always write notes).
+  // Keep every note this session: append to the therapist-only
+  // `sessions/{id}/private/therapist` doc so the end-of-session report can read
+  // them (optional input — therapists don't always write notes).
   useEffect(() => {
     if (!sessionId) return
-    const unsub = onSnapshot(doc(db, 'sessions', sessionId), (snap) => {
-      if (!snap.exists()) return
-      const arr = snap.data().therapistNotes
-      if (Array.isArray(arr)) setNotes(arr as SessionNote[])
-    })
+    const unsub = onSnapshot(
+      doc(db, 'sessions', sessionId, 'private', 'therapist'),
+      (snap) => {
+        const arr = snap.data()?.therapistNotes
+        if (Array.isArray(arr)) setNotes(arr as SessionNote[])
+      },
+      () => {}
+    )
     return () => unsub()
   }, [sessionId])
 
@@ -38,13 +41,17 @@ export default function NotesPanel({ open, onClose, sessionId }: NotesPanelProps
     if (!text.trim() || saving) return
     setSaving(true)
     try {
-      await updateDoc(doc(db, 'sessions', sessionId), {
-        therapistNotes: arrayUnion({
-          content: text.trim(),
-          timestamp: new Date().toISOString(),
-        }),
-        therapistNotesLastUpdated: serverTimestamp(),
-      })
+      await setDoc(
+        doc(db, 'sessions', sessionId, 'private', 'therapist'),
+        {
+          therapistNotes: arrayUnion({
+            content: text.trim(),
+            timestamp: new Date().toISOString(),
+          }),
+          therapistNotesLastUpdated: serverTimestamp(),
+        },
+        { merge: true }
+      )
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       setText('')
