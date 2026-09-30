@@ -602,11 +602,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
   }
 
   return (
-    <StaadVideo
-      sessionId={sessionId}
-      userName={profile ? `${profile.firstName} ${profile.lastName}` : 'User'}
-      role={isTherapist ? 'therapist' : 'client'}
-    >
+    <StaadVideo sessionId={sessionId}>
       {/* Runs the Sarvam pipeline inside the room provider so it can access the
           LiveKit room; reports recording state up to this page for the chip. */}
       <TranscriptionBridge

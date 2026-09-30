@@ -6,11 +6,10 @@ import {
 import '@livekit/components-styles'
 import { Room } from 'livekit-client'
 import { useEffect, useState, useMemo, useCallback, createContext, useContext } from 'react'
+import { authFetch } from '@/lib/progressApi'
 
 interface StaadVideoProps {
   sessionId: string
-  userName: string
-  role: 'therapist' | 'client'
   children: React.ReactNode
 }
 
@@ -23,7 +22,7 @@ const RoomCtx = createContext<RoomContextValue>({ disconnect: () => {}, room: nu
 
 export const useSessionRoom = () => useContext(RoomCtx)
 
-export default function StaadVideo({ sessionId, userName, role, children }: StaadVideoProps) {
+export default function StaadVideo({ sessionId, children }: StaadVideoProps) {
   const [token, setToken] = useState<string>('')
   const [error, setError] = useState('')
 
@@ -31,15 +30,17 @@ export default function StaadVideo({ sessionId, userName, role, children }: Staa
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
-    if (!sessionId || !userName) return
-    fetch(`/api/livekit-token?room=${sessionId}&name=${encodeURIComponent(userName)}&role=${role}`)
+    if (!sessionId) return
+    // Only the session id is sent. The server works out who we are from the ID
+    // token and our role/name from the database — neither is ours to claim.
+    authFetch(`/api/livekit-token?room=${encodeURIComponent(sessionId)}`)
       .then(r => r.json())
       .then(d => {
         if (d.token) setToken(d.token)
         else setError('Could not get video token')
       })
       .catch(() => setError('Video connection failed'))
-  }, [sessionId, userName, role])
+  }, [sessionId])
 
   const disconnect = useCallback(() => {
     room.disconnect()
