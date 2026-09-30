@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { ALL_MODULE_IDS } from '@/lib/modules';
+import { requireAdmin } from '@/lib/progressAuth';
 
 // GET /api/admin/therapists/[id]
 // Full detail view for one therapist: profile info, every client they've
@@ -8,6 +9,9 @@ import { ALL_MODULE_IDS } from '@/lib/modules';
 // and the same usage/AI stats shown on the overview table.
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   try {
+    const auth = await requireAdmin(request);
+    if (!auth.ok) return auth.response;
+
     const { id } = params;
 
     const therapist = await prisma.profileTherapist.findUnique({

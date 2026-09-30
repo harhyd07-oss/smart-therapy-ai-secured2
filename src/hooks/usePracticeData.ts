@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
+import { progressFetch } from '@/lib/progressApi';
 import type { PracticeBooking, PracticeClient, PracticeInvite, PracticeSession } from '@/lib/practice';
 
 /**
@@ -24,16 +25,17 @@ export function usePracticeData() {
     const isTherapist = role === 'THERAPIST';
     const param = isTherapist ? `therapistId=${profile.id}` : `clientId=${profile.id}`;
     try {
-      const [sRes, bRes, cRes, iRes] = await Promise.all([
+      const [sRes, bRes, cRes, iData] = await Promise.all([
         fetch(`/api/sessions?${param}`),
         fetch(`/api/bookings?${param}`),
         isTherapist ? fetch(`/api/clients?therapistId=${profile.id}`) : null,
-        isTherapist ? fetch(`/api/invites?therapistId=${profile.id}`) : null,
+        // Authenticated: invites carry client phone numbers.
+        isTherapist ? progressFetch('/api/invites').catch(() => null) : null,
       ]);
       if (sRes.ok) setSessions((await sRes.json()).sessions ?? []);
       if (bRes.ok) setBookings((await bRes.json()).bookings ?? []);
       if (cRes?.ok) setClients((await cRes.json()).clients ?? []);
-      if (iRes?.ok) setInvites((await iRes.json()).invites ?? []);
+      if (iData) setInvites(iData.invites ?? []);
       setError(sRes.ok ? null : 'Could not load your sessions. Please refresh.');
     } catch {
       setError('Could not reach the server. Check your connection and refresh.');

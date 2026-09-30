@@ -46,6 +46,7 @@ export interface PracticeInvite {
   firstName: string;
   lastName: string;
   diagnosis: string[];
+  phoneNumber: string | null;
   status: string;
   createdAt: string;
 }

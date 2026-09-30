@@ -1,23 +1,32 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { prisma } from '@/lib/db';
+import { requireTherapist } from '@/lib/progressAuth';
+import { normalizeIndianPhone } from '@/lib/phone';
 
-// POST /api/invites — therapist creates a patient invite (name + diagnosis only).
-// Returns the generated token so the client can build a shareable link.
+// POST /api/invites — the signed-in therapist creates a patient invite
+// (name, phone number, diagnosis). Returns the generated token so the client
+// can build a shareable link.
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const { therapistId, firstName, lastName, diagnosis, scheduledAt } = await request.json();
+    const auth = await requireTherapist(request);
+    if (!auth.ok) return auth.response;
+    const therapistId = auth.therapist.id;
 
-    if (!therapistId || !firstName) {
-      return NextResponse.json({ error: 'therapistId and firstName are required' }, { status: 400 });
+    const { firstName, lastName, diagnosis, scheduledAt, phoneNumber } = await request.json();
+
+    if (!firstName) {
+      return NextResponse.json({ error: 'firstName is required' }, { status: 400 });
     }
 
-    // Ensure the therapist exists
-    const therapist = await prisma.profileTherapist.findUnique({ where: { id: therapistId } });
-    if (!therapist) {
-      return NextResponse.json({ error: 'Therapist not found' }, { status: 404 });
+    const phone = normalizeIndianPhone(phoneNumber);
+    if (!phone) {
+      return NextResponse.json(
+        { error: 'A valid Indian mobile number is required, e.g. +91 9876543210' },
+        { status: 400 }
+      );
     }
 
     const invite = await prisma.invite.create({
@@ -27,6 +36,7 @@ export async function POST(request: Request) {
         firstName,
         lastName: lastName || '',
         diagnosis: Array.isArray(diagnosis) ? diagnosis : [],
+        phoneNumber: phone,
         scheduledAt: scheduledAt ? new Date(scheduledAt) : new Date(),
       },
     });
@@ -38,17 +48,14 @@ export async function POST(request: Request) {
   }
 }
 
-// GET /api/invites?therapistId=... — list a therapist's invites (optional, for dashboard).
+// GET /api/invites — list the signed-in therapist's invites (for the dashboard).
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const therapistId = searchParams.get('therapistId');
-    if (!therapistId) {
-      return NextResponse.json({ error: 'therapistId is required' }, { status: 400 });
-    }
+    const auth = await requireTherapist(request);
+    if (!auth.ok) return auth.response;
 
     const invites = await prisma.invite.findMany({
-      where: { therapistId },
+      where: { therapistId: auth.therapist.id },
       orderBy: { createdAt: 'desc' },
     });
 

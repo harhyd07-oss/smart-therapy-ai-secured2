@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Check, Copy, Loader2, Mail, MessageCircle, Send } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { DsDialog, Drawer, Field, Spinner, toast } from './ui';
+import { progressFetch } from '@/lib/progressApi';
+import { normalizeIndianPhone, whatsAppLink } from '@/lib/phone';
 import {
   DAY_NAMES,
   DEFAULT_DURATION,
@@ -305,6 +307,7 @@ export function AddClientDialog({
   const { profile } = useAuthStore();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [link, setLink] = useState('');
   const [copied, setCopied] = useState(false);
@@ -315,6 +318,7 @@ export function AddClientDialog({
     if (open) {
       setFirstName('');
       setLastName('');
+      setPhone('');
       setDiagnosis('');
       setLink('');
       setCopied(false);
@@ -325,21 +329,20 @@ export function AddClientDialog({
   const submit = async () => {
     if (!profile?.id) return;
     if (!firstName.trim()) return setError("Enter the client's first name.");
+    const phoneNumber = normalizeIndianPhone(phone);
+    if (!phoneNumber) return setError('Enter a valid Indian mobile number, e.g. +91 9876543210.');
     setSaving(true);
     setError('');
     try {
-      const res = await fetch('/api/invites', {
+      const data = await progressFetch('/api/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          therapistId: profile.id,
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          phoneNumber,
           diagnosis: diagnosis.split(',').map((d) => d.trim()).filter(Boolean),
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Could not create the invite.');
       setLink(`${window.location.origin}/auth?invite=${data.token}`);
       onCreated?.();
     } catch (e) {
@@ -401,7 +404,7 @@ export function AddClientDialog({
             </button>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <a className="ds-btn ds-btn-outline" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noopener noreferrer">
+            <a className="ds-btn ds-btn-outline" href={whatsAppLink(message, phone)} target="_blank" rel="noopener noreferrer">
               <MessageCircle /> WhatsApp
             </a>
             <a
@@ -422,6 +425,18 @@ export function AddClientDialog({
               <input id="client-last" className="ds-input" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Maurya" />
             </Field>
           </div>
+          <Field label="Phone number" htmlFor="client-phone">
+            <input
+              id="client-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              className="ds-input"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+91 9876543210"
+            />
+          </Field>
           <Field label="Conditions" htmlFor="client-dx" hint="Separate with commas, e.g. Anxiety, ADHD">
             <input id="client-dx" className="ds-input" value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder="Anxiety, ADHD" />
           </Field>

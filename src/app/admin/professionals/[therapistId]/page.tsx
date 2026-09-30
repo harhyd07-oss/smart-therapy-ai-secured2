@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/useAuthStore';
+import { progressFetch } from '@/lib/progressApi';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { ArrowLeft, Mail, Calendar, Clock, Users, Activity, Sparkles, Puzzle, FileText } from 'lucide-react';
 
@@ -73,12 +74,7 @@ export default function TherapistDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/therapists/${therapistId}`);
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `Request failed (${res.status})`);
-      }
-      const data = await res.json();
+      const data = await progressFetch(`/api/admin/therapists/${therapistId}`);
       setTherapist(data.therapist);
       setStats(data.stats);
       setClients(data.clients || []);

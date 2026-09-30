@@ -190,6 +190,9 @@ model Invite {
   firstName       String
   lastName        String
   diagnosis       String[]
+  // E.164 (+91XXXXXXXXXX). Nullable only because older invites predate it;
+  // POST /api/invites requires it for every new invite.
+  phoneNumber     String?
   scheduledAt     DateTime         @default(now())
   status          InviteStatus     @default(PENDING)
   claimedClientId String?

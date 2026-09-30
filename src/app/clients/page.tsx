@@ -48,6 +48,7 @@ import {
   type MenuItem,
 } from '@/components/practice/ui';
 import { AddClientDialog, BookSessionDialog, StartSessionDialog } from '@/components/practice/dialogs';
+import { whatsAppLink } from '@/lib/phone';
 import {
   CLIENT_STATUS_META,
   SESSION_KIND,
@@ -678,7 +679,7 @@ export default function ClientsPage() {
                         </button>
                         <a
                           className="ds-icon-btn"
-                          href={`https://wa.me/?text=${encodeURIComponent(`You're invited to a STAAD therapy session. Sign up here: ${link}`)}`}
+                          href={whatsAppLink(`You're invited to a STAAD therapy session. Sign up here: ${link}`, inv.phoneNumber)}
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={`Share invite for ${fullName(inv)} on WhatsApp`}
