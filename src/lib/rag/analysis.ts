@@ -22,7 +22,7 @@ export async function runAnalysis(
   } = options
 
   console.log(`[Analysis] Starting for session ${sessionId}`)
-  console.log(`[Analysis] Client: ${clientProfile.name}, Window: ${transcriptWindowMinutes}min`)
+  console.log(`[Analysis] Window: ${transcriptWindowMinutes}min`)
 
   const context = await retrieveRAGContext(
     sessionId,
@@ -31,7 +31,7 @@ export async function runAnalysis(
     transcriptWindowMinutes
   )
 
-  console.log(`[Analysis] Context retrieved — transcript: ${context.transcript.slice(0, 80)}...`)
+  console.log(`[Analysis] Context retrieved — transcript: ${context.transcript.length} chars`)
   console.log(`[Analysis] Study material chunks: ${context.studyMaterial.length}`)
   console.log(`[Analysis] Previous notes: ${context.previousNotes.length}`)
 
