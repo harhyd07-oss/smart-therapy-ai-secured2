@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Loader2, Check, X, RefreshCw, Ban, Inbox } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { MODULE_CATEGORIES, moduleName } from '@/lib/modules';
+import { authFetch } from '@/lib/progressApi';
 
 const CARD_BASE =
   'rounded-[14px] border-[0.5px] border-[var(--glass-border)] shadow-[var(--glass-shadow)] bg-[var(--glass-bg)] dark:bg-[#16221e] animate-fade-up';
@@ -74,7 +75,7 @@ export default function AdminSubscriptionsPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/subscriptions');
+      const res = await authFetch('/api/admin/subscriptions');
       if (res.ok) {
         const d = await res.json();
         setPros(d.professionals || []);
@@ -102,7 +103,7 @@ export default function AdminSubscriptionsPage() {
   };
 
   const review = async (r: Request, action: 'approve' | 'reject', extra?: object) => {
-    const res = await fetch(`/api/admin/subscriptions/requests/${r.id}`, {
+    const res = await authFetch(`/api/admin/subscriptions/requests/${r.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, ...extra }),
@@ -133,7 +134,7 @@ export default function AdminSubscriptionsPage() {
   const manage = async (sub: Current, action: 'renew' | 'cancel') => {
     setBusy(sub.id);
     try {
-      await fetch(`/api/admin/subscriptions/${sub.id}`, {
+      await authFetch(`/api/admin/subscriptions/${sub.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, months: sub.months }),

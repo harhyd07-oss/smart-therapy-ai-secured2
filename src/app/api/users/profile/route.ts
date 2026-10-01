@@ -1,17 +1,28 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { adminAuth } from '@/lib/firebaseAdmin';
+import { requireSignedIn } from '@/lib/progressAuth';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
-  try {
-    const { uid, email, role, firstName, lastName, specialty, dateOfBirth, diagnosis, inviteToken } = await request.json();
+// Every method acts on the CALLER's own account only. Identity (uid, email)
+// comes from the verified Firebase ID token — any uid/email in the query or
+// body is ignored. requireSignedIn (not requireUser) because signup and the
+// first "do I have a profile?" lookup happen before a profile exists.
 
-    if (!uid || !email || !role) {
+export async function POST(request: Request) {
+  const auth = await requireSignedIn(request);
+  if (!auth.ok) return auth.response;
+  const { uid, email } = auth;
+
+  try {
+    const { role, firstName, lastName, specialty, dateOfBirth, diagnosis, inviteToken } = await request.json();
+
+    if (!email || !role) {
       return NextResponse.json({ error: 'Missing core credentials' }, { status: 400 });
     }
 
+    // Self-registration can only ever produce THERAPIST or CLIENT — never ADMIN.
     const roleEnum = role === 'THERAPIST' ? 'THERAPIST' : 'CLIENT';
 
     // Create user and profile transactionally; claim invite if present.
@@ -94,12 +105,19 @@ export async function POST(request: Request) {
 }
 
 export async function PUT(request: Request) {
-  try {
-    const { uid, role, firstName, lastName, qualification, experience, specialty, bio, dateOfBirth, gender, diagnosis } = await request.json();
+  const auth = await requireSignedIn(request);
+  if (!auth.ok) return auth.response;
+  const { uid } = auth;
 
-    if (!uid) {
-      return NextResponse.json({ error: 'uid is required' }, { status: 400 });
+  try {
+    const { firstName, lastName, qualification, experience, specialty, bio, dateOfBirth, gender, diagnosis } = await request.json();
+
+    // Which profile to update comes from the caller's own stored role, not the body.
+    const existing = await prisma.user.findUnique({ where: { id: uid }, select: { role: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+    const role = existing.role;
 
     if (role === 'THERAPIST') {
       const updated = await prisma.profileTherapist.update({
@@ -142,13 +160,16 @@ export async function PUT(request: Request) {
 // Sessions/bookings/notes/invites are not cascade-deleted from the profile, so
 // they are cleared explicitly inside a transaction before the user is removed
 // (deleting the User cascades to the therapist/client profile itself).
+//
+// The browser deletes the Firebase account first (that step enforces Firebase's
+// recent-login requirement) using an ID token captured BEFORE the deletion; the
+// token still verifies afterwards, so the purge below runs as that same user.
 export async function DELETE(request: Request) {
-  try {
-    const { uid } = await request.json();
-    if (!uid) {
-      return NextResponse.json({ error: 'uid is required' }, { status: 400 });
-    }
+  const auth = await requireSignedIn(request);
+  if (!auth.ok) return auth.response;
+  const { uid } = auth;
 
+  try {
     const user = await prisma.user.findUnique({
       where: { id: uid },
       include: { therapist: true, client: true },
@@ -183,13 +204,12 @@ export async function DELETE(request: Request) {
   }
 }
 
+// GET — the caller's own user + profile; 404 when they haven't onboarded yet
+// (AuthProvider relies on that 404 to send them to /onboarding).
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const uid = searchParams.get('uid');
-
-  if (!uid) {
-    return NextResponse.json({ error: 'UID is required' }, { status: 400 });
-  }
+  const auth = await requireSignedIn(request);
+  if (!auth.ok) return auth.response;
+  const { uid } = auth;
 
   try {
     const user = await prisma.user.findUnique({

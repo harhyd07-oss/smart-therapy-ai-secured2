@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // GET /api/admin/plans — list all plans (active + inactive) for catalog mgmt.
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const plans = await prisma.plan.findMany({
       orderBy: [{ sortOrder: 'asc' }, { priceMonthly: 'asc' }],
@@ -18,6 +25,9 @@ export async function GET() {
 // Body: { name, description?, priceMonthly?, durationMonths?, toolQuota?, sortOrder? }
 // toolQuota null/empty ⇒ unlimited (all tools).
 export async function POST(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const body = await request.json();
     const name = String(body.name || '').trim();

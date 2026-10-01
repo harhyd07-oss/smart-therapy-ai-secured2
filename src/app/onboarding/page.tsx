@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { authFetch } from '@/lib/progressApi';
 
 function OnboardingForm() {
   const { uid, email, setRoleAndProfile } = useAuthStore();
@@ -65,14 +66,13 @@ function OnboardingForm() {
     const diagnosis = diagnosisInput.split(',').map(d => d.trim()).filter(d => d.length > 0);
 
     try {
-      const response = await fetch('/api/users/profile', {
+      const response = await authFetch('/api/users/profile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        // uid/email come from the ID token server-side — not sent from here.
         body: JSON.stringify({
-          uid,
-          email,
           role,
           firstName,
           lastName,

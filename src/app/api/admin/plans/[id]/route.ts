@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // PATCH /api/admin/plans/[id] — update a plan (name, pricing, quota, active flag).
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const body = await request.json();
     const data: any = {};
@@ -34,7 +41,10 @@ export async function PATCH(request: Request, { params }: { params: { id: string
 
 // DELETE /api/admin/plans/[id] — remove a plan if unused, else soft-disable it so
 // existing subscriptions/requests that reference it remain valid.
-export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
+export async function DELETE(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const [subs, reqs] = await Promise.all([
       prisma.subscription.count({ where: { planId: params.id } }),

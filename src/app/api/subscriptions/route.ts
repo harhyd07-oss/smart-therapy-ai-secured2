@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { resolveCurrent, serializeSubscription } from '@/lib/subscriptions';
+import { requireTherapist } from '@/lib/progressAuth';
 
-// GET /api/subscriptions?therapistId= — a therapist's current plan (or null for
-// free tier), any pending request, and their term history.
+// GET /api/subscriptions — the signed-in therapist's current plan (or null for
+// free tier), any pending request, and their term history. The therapist comes
+// from the ID token; a ?therapistId= query parameter is ignored.
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
+  const auth = await requireTherapist(request);
+  if (!auth.ok) return auth.response;
+  const therapistId = auth.therapist.id;
+
   try {
-    const { searchParams } = new URL(request.url);
-    const therapistId = searchParams.get('therapistId');
-    if (!therapistId) {
-      return NextResponse.json({ error: 'therapistId is required' }, { status: 400 });
-    }
 
     const [subs, pending] = await Promise.all([
       prisma.subscription.findMany({

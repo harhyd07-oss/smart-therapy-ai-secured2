@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Heart, Sparkles, Video, ShieldCheck } from 'lucide-react';
+import { authFetch } from '@/lib/progressApi';
 
 function AuthForm() {
   const [isLogin, setIsLogin] = useState(true);
@@ -84,7 +85,7 @@ function AuthForm() {
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
-      const checkProfile = await fetch(`/api/users/profile?uid=${result.user.uid}`);
+      const checkProfile = await authFetch('/api/users/profile');
       if (checkProfile.ok) {
         router.push('/');
       } else {

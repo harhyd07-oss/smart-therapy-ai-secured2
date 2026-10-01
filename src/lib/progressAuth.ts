@@ -22,7 +22,7 @@ async function verifyBearer(request: Request) {
 
   try {
     const decoded = await adminAuth().verifyIdToken(token);
-    return { ok: true as const, uid: decoded.uid };
+    return { ok: true as const, uid: decoded.uid, email: decoded.email ?? null };
   } catch (err: any) {
     return {
       ok: false as const,
@@ -32,6 +32,22 @@ async function verifyBearer(request: Request) {
       ),
     };
   }
+}
+
+/**
+ * Verifies the caller's Firebase ID token and returns the verified uid/email —
+ * WITHOUT requiring a database User row. For routes used before a profile
+ * exists (signup/onboarding, the first "do I have a profile?" lookup) and for
+ * any signed-in user regardless of role (e.g. the support form).
+ *
+ * Identity comes only from the token; never take uid/email from the request.
+ *
+ *   const auth = await requireSignedIn(request);
+ *   if (!auth.ok) return auth.response;
+ *   const { uid, email } = auth;
+ */
+export async function requireSignedIn(request: Request) {
+  return verifyBearer(request);
 }
 
 /**

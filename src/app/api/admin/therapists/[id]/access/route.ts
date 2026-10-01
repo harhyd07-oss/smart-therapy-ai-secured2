@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
 import { ALL_MODULE_IDS } from '@/lib/modules';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // PATCH /api/admin/therapists/[id]/access — set a therapist's module access.
 // Body: { allModulesAllowed: boolean, moduleAccess: string[] }
@@ -8,6 +12,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: { id: string } }
 ) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const { allModulesAllowed, moduleAccess } = await request.json();
 

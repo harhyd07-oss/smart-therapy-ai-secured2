@@ -6,6 +6,7 @@ import { CalendarDays, CheckCircle2, ChevronRight, CircleHelp, Info, LifeBuoy, L
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Card, Field, PageHeader, toast } from '@/components/practice/ui';
+import { authFetch } from '@/lib/progressApi';
 
 const CATEGORIES = ['Technical Issue', 'Billing', 'Account', 'Feedback', 'Other'];
 const SUPPORT_EMAIL = 'om.cofounder@staad.in';
@@ -42,10 +43,10 @@ export default function HelpPage() {
     }
     setSending(true);
     try {
-      const res = await fetch('/api/support', {
+      const res = await authFetch('/api/support', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: fullName, email, role, category, subject: subject.trim(), message: message.trim() }),
+        body: JSON.stringify({ category, subject: subject.trim(), message: message.trim() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

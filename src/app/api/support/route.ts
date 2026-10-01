@@ -1,38 +1,56 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { prisma } from '@/lib/db';
+import { requireSignedIn } from '@/lib/progressAuth';
 
 // Where all helpdesk tickets are delivered.
 const SUPPORT_INBOX = 'om.cofounder@staad.in';
 
 const CATEGORIES = ['Technical Issue', 'Billing', 'Account', 'Feedback', 'Other'];
 
-// POST /api/support — a logged-in user raises a helpdesk ticket.
-// The submission is emailed to the support inbox via SMTP.
+// POST /api/support — a logged-in user (any role, admins included) raises a
+// helpdesk ticket. The submission is emailed to the support inbox via SMTP.
+//
+// Who sent it comes ONLY from the verified ID token (email) and the caller's
+// own database record (name, role) — any name/email/role in the body is
+// ignored, so a ticket can't be sent in someone else's name.
 export async function POST(request: Request) {
+  const auth = await requireSignedIn(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const body = await request.json();
     const {
-      name,
-      email,
-      role,
       category,
       subject,
       message,
     }: {
-      name?: string;
-      email?: string;
-      role?: string;
       category?: string;
       subject?: string;
       message?: string;
     } = body;
 
-    if (!email || !subject?.trim() || !message?.trim()) {
+    const email = auth.email;
+    if (!email) {
       return NextResponse.json(
-        { error: 'email, subject and message are required' },
+        { error: 'Your account has no email address to reply to.' },
         { status: 400 }
       );
     }
+    if (!subject?.trim() || !message?.trim()) {
+      return NextResponse.json(
+        { error: 'subject and message are required' },
+        { status: 400 }
+      );
+    }
+
+    const account = await prisma.user.findUnique({
+      where: { id: auth.uid },
+      include: { therapist: true, client: true, admin: true },
+    });
+    const profile = account?.therapist ?? account?.client ?? account?.admin ?? null;
+    const name = profile ? `${profile.firstName} ${profile.lastName}`.trim() : '';
+    const role = account?.role;
 
     const ticketCategory = CATEGORIES.includes(category || '') ? category : 'Other';
 

@@ -3,6 +3,9 @@ import { prisma } from '@/lib/db';
 import { ALL_MODULE_IDS } from '@/lib/modules';
 import { requireAdmin } from '@/lib/progressAuth';
 
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
+
 // GET /api/admin/therapists/[id]
 // Full detail view for one therapist: profile info, every client they've
 // seen, every session (with client name/status/duration), invite history,

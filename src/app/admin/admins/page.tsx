@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Shield, Plus, Loader2, Mail } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import { authFetch } from '@/lib/progressApi';
 
 const CARD_BASE =
   'rounded-[14px] border-[0.5px] border-[var(--glass-border)] shadow-[var(--glass-shadow)] bg-[var(--glass-bg)] dark:bg-[#16221e] animate-fade-up';
@@ -46,7 +47,7 @@ export default function AdminsPage() {
   const fetchAdmins = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/admins');
+      const res = await authFetch('/api/admin/admins');
       if (res.ok) { const d = await res.json(); setAdmins(d.admins || []); }
     } catch (err) { console.error(err); }
     setLoading(false);
@@ -61,7 +62,7 @@ export default function AdminsPage() {
     if (!email.trim()) { setError('Email is required.'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/admins', {
+      const res = await authFetch('/api/admin/admins', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password, firstName: firstName.trim(), lastName: lastName.trim() }),
@@ -139,7 +140,7 @@ export default function AdminsPage() {
             <div className="space-y-1">
               <label className="text-sm font-semibold" style={{ color: 'var(--ink-muted)' }}>Password</label>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min 6 characters (new accounts)" className="w-full rounded-xl p-3 text-sm focus-visible:outline-none" style={inputStyle} />
-              <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>For an existing user, leave blank to keep their password.</p>
+              <p className="text-xs" style={{ color: 'var(--ink-muted)' }}>For an existing user, leave blank — their password is never changed here.</p>
             </div>
             {error && <p className="text-sm font-medium" style={{ color: '#ef4444' }}>{error}</p>}
           </div>

@@ -9,6 +9,7 @@ import { useTherapistGuard } from '@/hooks/usePracticeData';
 import { Card, DsDialog, ErrorBanner, IconBubble, LoadingBlock, PageHeader, Pill, cx, toast } from '@/components/practice/ui';
 import { ALL_MODULE_IDS, MODULE_CATEGORIES, resolveAllowedModuleIds } from '@/lib/modules';
 import { fmtDate } from '@/lib/practice';
+import { authFetch } from '@/lib/progressApi';
 
 interface Plan {
   id: string;
@@ -83,7 +84,7 @@ export default function PlansPage() {
     if (!profile?.id) return;
     setLoading(true);
     try {
-      const [pRes, sRes] = await Promise.all([fetch('/api/plans'), fetch(`/api/subscriptions?therapistId=${profile.id}`)]);
+      const [pRes, sRes] = await Promise.all([fetch('/api/plans'), authFetch('/api/subscriptions')]);
       if (pRes.ok) setPlans((await pRes.json()).plans || []);
       if (sRes.ok) {
         const d = await sRes.json();
@@ -127,10 +128,10 @@ export default function PlansPage() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch('/api/subscriptions/request', {
+      const res = await authFetch('/api/subscriptions/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ therapistId: profile.id, planId: reqPlan.id, months, modules: Array.from(selected) }),
+        body: JSON.stringify({ planId: reqPlan.id, months, modules: Array.from(selected) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {

@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
 import { ALL_MODULE_IDS } from '@/lib/modules';
 import { addMonths } from '@/lib/subscriptions';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // POST /api/admin/subscriptions/requests/[id] — approve or reject a plan request.
 // Body: { action: 'approve' | 'reject', modules?, months? }
@@ -9,6 +13,9 @@ import { addMonths } from '@/lib/subscriptions';
 // and the therapist's module access is set from the (admin-confirmable) tool list
 // — unlimited plans grant all tools.
 export async function POST(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const { action, modules, months } = await request.json();
 

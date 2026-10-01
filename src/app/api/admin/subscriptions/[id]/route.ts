@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
 import { addMonths } from '@/lib/subscriptions';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // PATCH /api/admin/subscriptions/[id] — manage an existing term.
 // Body: { action: 'renew' | 'cancel' | 'reactivate', months? }
 // renew: extends currentPeriodEnd by `months`, bumps renewalCount, marks renewed.
 export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const { action, months } = await request.json();
 

@@ -1,9 +1,16 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
 import { ALL_MODULE_IDS } from '@/lib/modules';
 
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
+
 // GET /api/admin/overview — per-therapist resource usage for the admin dashboard.
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const therapists = await prisma.profileTherapist.findMany({
       include: { user: { select: { email: true } } },

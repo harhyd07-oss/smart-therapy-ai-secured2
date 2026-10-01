@@ -130,7 +130,8 @@ Source of truth: `prisma/schema.prisma`. Enums: `Role`, `SessionStatus`, `Invite
 - `POST /api/sarvam-token` — returns the Sarvam STT key for the browser WebSocket (auth-gated).
   ⚠️ Sarvam has no ephemeral-token mechanism + browser WS can't set headers, so the key is
   ultimately a query param (tracked tech debt; route isolates future hardening).
-- `POST /api/deepgram-token` — **legacy** (~10s temp key); unused since the Sarvam switch, kept as fallback.
+- ~~`POST /api/deepgram-token`~~ — **removed.** It was a legacy endpoint (~10s Deepgram temp key),
+  unused since the Sarvam switch; repository inspection confirmed nothing called it, so it was deleted.
 - `POST /api/ai-insight` — gates on AI consent + transcript presence, runs `runAnalysis()`,
   writes `aiInsight` to Firestore, logs an `AI_ANALYSIS` UsageEvent.
 - `GET/POST/PATCH /api/session-report` — GET stored report; POST generates/regenerates it

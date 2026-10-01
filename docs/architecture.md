@@ -58,7 +58,7 @@
 | Route | Method | Purpose |
 |---|---|---|
 | `/api/ai-insight` | POST | Run RAG analysis, return AIInsight, persist to Firestore |
-| `/api/deepgram-token` | POST | Create short-lived (10s) Deepgram API key for browser |
+| ~~`/api/deepgram-token`~~ | POST | **Removed.** Legacy short-lived (10s) Deepgram key endpoint; unused after the switch to Sarvam STT, so it was deleted |
 | `/api/cleanup-transcripts` | GET | Cron job — clear transcripts > 24h (gated by `CRON_SECRET`) |
 | `/api/livekit-token` | GET | Generate LiveKit join token |
 | `/api/users/profile` | GET | Fetch user role + profile from PostgreSQL |
@@ -198,7 +198,7 @@ StaadVideo (LiveKitRoom wrapper)
    - `userRole === 'therapist'`
    - `room.state === 'connected'`
    - `consentStatus.therapist === true && consentStatus.client === true`
-2. **POST `/api/deepgram-token`** → Firebase Admin verifies auth → `deepgram.manage.createProjectKey()` → returns temp key (10s TTL)
+2. *(Historical — this endpoint has been removed.)* **POST `/api/deepgram-token`** → `deepgram.manage.createProjectKey()` → returns temp key (10s TTL). It was unused after the switch to Sarvam STT and was deleted.
 3. **WebSocket** opened to `wss://api.deepgram.com/v1/listen` with temp key
 4. **Audio capture** via `AudioContext` (16kHz) + `ScriptProcessorNode` (4096 buffer):
    - Gets local mic track from `room.localParticipant`
@@ -270,7 +270,6 @@ STAAD-therapy/
 │   │   │   ├── bookings/route.ts        # GET/POST — bookings
 │   │   │   ├── cleanup-transcripts/route.ts  # GET — cron cleanup
 │   │   │   ├── clients/route.ts         # GET — client list
-│   │   │   ├── deepgram-token/route.ts  # POST — temp Deepgram key
 │   │   │   ├── livekit-token/route.ts   # GET — LiveKit token
 │   │   │   ├── notes/route.ts           # GET/POST — session notes
 │   │   │   ├── sessions/route.ts        # GET/POST — sessions
@@ -345,7 +344,7 @@ STAAD-therapy/
 
 ### Why browser-side Deepgram connection (not server relay)?
 - Direct WebSocket from browser avoids proxying audio through our server (expensive bandwidth + latency)
-- Short-lived temp key (10s TTL) via `POST /api/deepgram-token` secures the API key
+- Short-lived temp key (10s TTL) via `POST /api/deepgram-token` secured the API key *(historical — that endpoint was unused after the switch to Sarvam STT and has been removed)*
 - Trade-off: heavier client, but significantly cheaper server costs
 
 ### Why ScriptProcessorNode (deprecated)?

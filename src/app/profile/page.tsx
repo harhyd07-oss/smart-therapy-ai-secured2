@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { auth } from '@/lib/firebase';
 import { Card, Field, IconBubble, PageHeader, Pill, cx, toast } from '@/components/practice/ui';
 import { initials } from '@/lib/practice';
+import { authFetch } from '@/lib/progressApi';
 
 const SPECIALITIES = ['SLD', 'ADHD', 'Anxiety', 'Depression', 'ID', 'Autism', 'Dyslexia', 'Trauma', 'General'];
 const QUALIFICATIONS = ['BA/BSc', 'MA/MSc', 'M.Phil', 'Ph.D', 'MD', 'DM'];
@@ -142,10 +143,10 @@ export default function ProfilePage() {
     }
     setSaving(true);
     try {
-      const body: Record<string, unknown> = { uid, role, firstName: firstName.trim(), lastName: lastName.trim() };
+      const body: Record<string, unknown> = { firstName: firstName.trim(), lastName: lastName.trim() };
       if (isTherapist) Object.assign(body, { qualification, experience, specialty: specialties, bio });
       else Object.assign(body, { dateOfBirth: dateOfBirth || undefined, gender });
-      const res = await fetch('/api/users/profile', {
+      const res = await authFetch('/api/users/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -181,15 +182,20 @@ export default function ProfilePage() {
     setDeleteError('');
     setDeleting(true);
     try {
-      // Remove the Firebase Auth user first; this can require a recent login.
+      // Capture the ID token BEFORE deleting the Firebase user: afterwards there
+      // is no signed-in user to mint one, but this token still verifies, so the
+      // server can purge this account's data — and only this account's.
       const current = auth.currentUser;
+      const token = current ? await current.getIdToken() : null;
+      // Remove the Firebase Auth user first; this can require a recent login.
       if (current) await deleteUser(current);
-      // Then purge all relational data for this user.
-      await fetch('/api/users/profile', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid }),
-      });
+      // Then purge all relational data for this user (identity from the token).
+      if (token) {
+        await fetch('/api/users/profile', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        });
+      }
       clearAuth();
       router.push('/auth');
     } catch (err: any) {

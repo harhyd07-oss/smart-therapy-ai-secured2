@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Users, Activity, Sparkles, Puzzle, SlidersHorizontal, Loader2 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { MODULE_CATEGORIES, ALL_MODULE_IDS } from '@/lib/modules';
+import { authFetch } from '@/lib/progressApi';
 
 const CARD_BASE =
   'rounded-[14px] border-[0.5px] border-[var(--glass-border)] shadow-[var(--glass-shadow)] bg-[var(--glass-bg)] dark:bg-[#16221e] animate-fade-up';
@@ -52,7 +53,7 @@ export default function AdminOverviewPage() {
   const fetchOverview = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/overview');
+      const res = await authFetch('/api/admin/overview');
       if (res.ok) {
         const data = await res.json();
         setRows(data.therapists || []);
@@ -79,7 +80,7 @@ export default function AdminOverviewPage() {
     if (!editing) return;
     setSavingAccess(true);
     try {
-      const res = await fetch(`/api/admin/therapists/${editing.id}/access`, {
+      const res = await authFetch(`/api/admin/therapists/${editing.id}/access`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ allModulesAllowed: allowAll, moduleAccess: Array.from(selected) }),

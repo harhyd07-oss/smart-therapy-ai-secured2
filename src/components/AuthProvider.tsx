@@ -5,6 +5,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useRouter, usePathname } from 'next/navigation';
+import { authFetch } from '@/lib/progressApi';
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
   const { setAuthUser, setRoleAndProfile, clearAuth, uid } = useAuthStore();
@@ -24,7 +25,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         }
 
         try {
-          const res = await fetch(`/api/users/profile?uid=${firebaseUser.uid}`);
+          const res = await authFetch('/api/users/profile');
           if (res.ok) {
             const data = await res.json();
             if (data.user) {

@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/progressAuth';
 import { resolveCurrent, serializeSubscription } from '@/lib/subscriptions';
+
+// Admin-only and per-request: never prerender database responses into the build.
+export const dynamic = 'force-dynamic';
 
 // GET /api/admin/subscriptions — every professional with their current plan
 // (months / period end / renewed) plus all pending plan requests to review.
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
+
   try {
     const [therapists, requests] = await Promise.all([
       prisma.profileTherapist.findMany({

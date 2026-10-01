@@ -11,7 +11,10 @@ export function adminAuth() {
   return {
     verifyIdToken: async (token: string) => {
       if (!token.startsWith('token-')) throw new Error('invalid token')
-      return { uid: token.slice('token-'.length) }
+      const uid = token.slice('token-'.length)
+      // Synthetic, derived from the uid — lets tests prove identity (incl.
+      // email) comes from the verified token rather than the request.
+      return { uid, email: `${uid}@token.test` }
     },
   }
 }

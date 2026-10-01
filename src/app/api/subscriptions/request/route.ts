@@ -1,17 +1,23 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { ALL_MODULE_IDS } from '@/lib/modules';
+import { requireTherapist } from '@/lib/progressAuth';
 
 // POST /api/subscriptions/request — a therapist requests a plan (pending admin
-// approval). Body: { therapistId, planId, months?, modules?, note? }
-// `modules` are the specific tools the therapist wants; capped by the plan's
-// toolQuota (ignored for unlimited plans).
+// approval). Body: { planId, months?, modules?, note? }. The request is always
+// filed for the signed-in therapist (from the ID token); a body therapistId is
+// ignored. `modules` are the specific tools the therapist wants; capped by the
+// plan's toolQuota (ignored for unlimited plans).
 export async function POST(request: Request) {
-  try {
-    const { therapistId, planId, months, modules, note } = await request.json();
+  const auth = await requireTherapist(request);
+  if (!auth.ok) return auth.response;
+  const therapistId = auth.therapist.id;
 
-    if (!therapistId || !planId) {
-      return NextResponse.json({ error: 'therapistId and planId are required' }, { status: 400 });
+  try {
+    const { planId, months, modules, note } = await request.json();
+
+    if (!planId) {
+      return NextResponse.json({ error: 'planId is required' }, { status: 400 });
     }
 
     const [therapist, plan, existingPending] = await Promise.all([
