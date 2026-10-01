@@ -21,6 +21,19 @@ loadEnvConfig(process.cwd())
 // needing to set NODE_ENV on the command line.
 const dev = !process.argv.includes('--prod') && process.env.NODE_ENV !== 'production'
 if (!dev) process.env.NODE_ENV = 'production'
+
+// Self-hosted production (`npm start`) refuses to boot without the required
+// OpenRouter configuration. This does NOT run on Vercel, which never uses this
+// file — there, src/lib/report/openrouter-client.ts enforces the same check
+// before every AI request. The error names variables only, never values.
+if (!dev) {
+  try {
+    require('./config/ai-env').assertAiEnv(process.env)
+  } catch (e) {
+    console.error(`> ${e.message}`)
+    process.exit(1)
+  }
+}
 const port = parseInt(process.env.PORT || '3000', 10)
 const app = next({ dev })
 const handle = app.getRequestHandler()

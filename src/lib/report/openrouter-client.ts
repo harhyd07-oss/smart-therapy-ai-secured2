@@ -1,18 +1,19 @@
 import OpenAI from 'openai'
+import { assertAiEnv } from '../../../config/ai-env'
 
-// Free model by default; override with OPENROUTER_MODEL in .env to swap (e.g.
-// to a stronger paid model or Claude) without touching code. The report runs
-// once after the session — speed is irrelevant, so a larger free model is fine.
-export const REPORT_MODEL =
-  process.env.OPENROUTER_MODEL || 'openai/gpt-oss-120b:free'
+// The OpenRouter model comes ONLY from the MODEL env var — there is no
+// hard-coded fallback. The same model serves the session report and the live
+// copilot + safety passes. For the current validation period that is the free
+// model `openai/gpt-oss-20b:free`; it is NOT a paid, private or zero-retention
+// service. Missing MODEL is caught by assertAiEnv before any request.
+export const REPORT_MODEL = process.env.MODEL ?? ''
 
-// Lazily constructed so a missing key never breaks builds/imports — it only
-// throws when a report is actually generated.
+// Lazily constructed so missing configuration never breaks builds/imports —
+// assertAiEnv runs before every AI request and fails clearly (naming the
+// missing variable, never its value). On Vercel this is the production check.
 let client: OpenAI | null = null
 function getClient(): OpenAI {
-  if (!process.env.OPENROUTER_API_KEY) {
-    throw new Error('OPENROUTER_API_KEY is not set in .env')
-  }
+  assertAiEnv(process.env)
   if (!client) {
     client = new OpenAI({
       apiKey: process.env.OPENROUTER_API_KEY,
@@ -42,11 +43,9 @@ export async function generateReportText(
   return res.choices[0]?.message?.content ?? ''
 }
 
-// Live copilot model — separate from the report so it can be swapped/tuned for
-// latency without affecting the (latency-insensitive) end-of-session report.
-// gpt-oss-120b was the only probed free model that reliably surfaced safety cues.
-export const COPILOT_MODEL =
-  process.env.OPENROUTER_COPILOT_MODEL || 'openai/gpt-oss-120b:free'
+// Live copilot + safety model — the same configured MODEL as the report. Kept
+// as its own export so the call sites don't change.
+export const COPILOT_MODEL = process.env.MODEL ?? ''
 
 // Low-temperature chat for the copilot's structured (JSON) passes. We deliberately
 // do NOT set response_format: json_object — gpt-oss models mangle their output under
