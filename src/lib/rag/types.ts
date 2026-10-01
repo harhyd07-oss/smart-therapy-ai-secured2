@@ -25,6 +25,8 @@ export interface AIInsight {
   // Populated by the dedicated safety pass (src/lib/rag/safety.ts).
   riskLevel?: 'none' | 'watch' | 'urgent'
   riskDetail?: string
+  // The AI safety check failed; riskLevel is a conservative 'watch' fallback.
+  riskCheckUnavailable?: boolean
   generatedAt: number
   transcriptWindowMinutes: number
 }

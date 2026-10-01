@@ -4,6 +4,22 @@ import type { AIInsight } from '@/lib/rag/types'
 import { GLASS } from './roomTheme'
 import PanelShell from './PanelShell'
 import { moduleName } from '@/lib/modules'
+import type { LocalRiskLevel } from '@/lib/rag/local-safety'
+
+const RISK_BANNER: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: 7,
+  background: 'rgba(232,137,122,0.18)',
+  border: '1px solid rgba(232,137,122,0.4)',
+  borderRadius: 10,
+  padding: '8px 10px',
+  marginBottom: 10,
+  fontSize: 11,
+  color: '#E8897A',
+  fontWeight: 500,
+  lineHeight: 1.45,
+}
 
 // Live AI insight view — distinct from the AI Notes editor.
 //
@@ -11,8 +27,13 @@ import { moduleName } from '@/lib/modules'
 // document the page already subscribes to for the AI Copilot, and
 // `onLaunchModule` is the same launch handler AIInsightBar used. This component
 // only re-skins that data into the card layout.
+//
+// `localRisk` is the therapist-side, in-memory keyword safety net over the
+// client's live speech (src/lib/rag/local-safety.ts) — shown even before any
+// AI analysis has run, and carrying no transcript text.
 export default function AIAssistantPanel({
   insight,
+  localRisk = 'none',
   live,
   analyseLoading,
   analyseDisabled,
@@ -21,6 +42,7 @@ export default function AIAssistantPanel({
   onClose,
 }: {
   insight: AIInsight | null
+  localRisk?: LocalRiskLevel
   live: boolean
   analyseLoading: boolean
   analyseDisabled: boolean
@@ -121,25 +143,21 @@ export default function AIAssistantPanel({
           </p>
 
           {insight?.riskFlag && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 7,
-                background: 'rgba(232,137,122,0.18)',
-                border: '1px solid rgba(232,137,122,0.4)',
-                borderRadius: 10,
-                padding: '8px 10px',
-                marginBottom: 10,
-                fontSize: 11,
-                color: '#E8897A',
-                fontWeight: 500,
-                lineHeight: 1.45,
-              }}
-            >
+            <div style={RISK_BANNER}>
               <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-              Risk indicator detected — review transcript and consider crisis protocol if
-              appropriate.
+              {/* A failed safety check must not read as a real finding (or as
+                  "all clear") — say plainly that it didn't run. */}
+              {insight.riskCheckUnavailable
+                ? insight.riskDetail || 'Risk check unavailable — review the transcript manually.'
+                : 'Risk indicator detected — review transcript and consider crisis protocol if appropriate.'}
+            </div>
+          )}
+
+          {localRisk === 'watch' && (
+            <div style={RISK_BANNER}>
+              <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+              Possible risk language detected in the client&apos;s recent speech — review the
+              transcript.
             </div>
           )}
 

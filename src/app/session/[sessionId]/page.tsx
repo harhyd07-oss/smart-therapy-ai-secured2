@@ -15,6 +15,7 @@ import AIConsentBanner from '@/components/session/AIConsentBanner';
 import { AIErrorBoundary } from '@/components/session/AIErrorBoundary';
 import { useSessionTranscription } from '@/hooks/useSessionTranscription';
 import { useAttentionScoring, type AttentionState } from '@/hooks/useAttentionScoring';
+import type { LocalRiskLevel } from '@/lib/rag/local-safety';
 import { useLocalParticipant } from '@livekit/components-react';
 import StaadVideo, { useSessionRoom } from '@/components/StaadVideo';
 import RemoteVideoArea from '@/components/RemoteVideoArea';
@@ -57,12 +58,12 @@ function TranscriptionBridge({
   sessionId: string;
   enabled: boolean;
   userRole: 'therapist' | 'client';
-  onState: (s: { isRecording: boolean; chunkCount: number }) => void;
+  onState: (s: { isRecording: boolean; chunkCount: number; localRisk: LocalRiskLevel }) => void;
 }) {
-  const { isRecording, chunkCount } = useSessionTranscription({ sessionId, enabled, userRole });
+  const { isRecording, chunkCount, localRisk } = useSessionTranscription({ sessionId, enabled, userRole });
   useEffect(() => {
-    onState({ isRecording, chunkCount });
-  }, [isRecording, chunkCount, onState]);
+    onState({ isRecording, chunkCount, localRisk });
+  }, [isRecording, chunkCount, localRisk, onState]);
   return null;
 }
 
@@ -537,10 +538,24 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
   // The transcription hook needs the LiveKit room from <StaadVideo>'s context,
   // so it must run INSIDE that provider — see <TranscriptionBridge> rendered in
   // the JSX below. We lift just the bits we display/use back up to here.
-  const [transcription, setTranscription] = useState<{ isRecording: boolean; chunkCount: number }>({
+  const [transcription, setTranscription] = useState<{
+    isRecording: boolean;
+    chunkCount: number;
+    localRisk: LocalRiskLevel;
+  }>({
     isRecording: false,
     chunkCount: 0,
+    localRisk: 'none',
   });
+  // Local keyword safety net (therapist-side, in-memory): when the client's
+  // speech first trips it, tell the therapist immediately — without waiting for
+  // an AI analysis. The Assistant panel then shows a persistent banner.
+  useEffect(() => {
+    if (!isTherapist || transcription.localRisk === 'none') return;
+    showToast('Possible risk language detected — review the transcript');
+    setActivePanel((current) => (current === null ? 'assistant' : current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcription.localRisk, isTherapist]);
   // Attention scoring shares the transcription consent gate. NOTE: it does NOT
   // honour sttTestMode — that escape hatch bypasses client consent, and running
   // face tracking on someone who hasn't consented is not an acceptable
@@ -817,6 +832,7 @@ export default function SessionRoomPage({ params }: { params: { sessionId: strin
             <AIErrorBoundary>
               <AIAssistantPanel
                 insight={aiInsight}
+                localRisk={transcription.localRisk}
                 live={transcription.isRecording}
                 analyseLoading={analyseLoading}
                 analyseDisabled={!bothConsented || analyseCooldown || analyseLoading}

@@ -5,6 +5,7 @@ import { doc, updateDoc, arrayUnion, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useSessionRoom } from '@/components/StaadVideo'
 import type { TranscriptChunk } from '@/lib/rag/types'
+import { nextLocalRisk, type LocalRiskLevel } from '@/lib/rag/local-safety'
 
 interface UseSessionTranscriptionOptions {
   sessionId: string
@@ -16,6 +17,10 @@ interface TranscriptionState {
   isRecording: boolean
   error: string | null
   chunkCount: number
+  // Local keyword safety net over the client's speech (see
+  // src/lib/rag/local-safety.ts). In-memory, therapist-side only, never lowered
+  // during the session, and carries no transcript text.
+  localRisk: LocalRiskLevel
 }
 
 // One independent Sarvam pipeline per participant audio track. Because each
@@ -71,6 +76,7 @@ export function useSessionTranscription({
     isRecording: false,
     error: null,
     chunkCount: 0,
+    localRisk: 'none',
   })
   const shouldRun = enabled && userRole === 'therapist'
 
@@ -85,6 +91,12 @@ export function useSessionTranscription({
         sessionMinute: Math.floor((Date.now() - startTimeRef.current) / 60000),
         isFinal: true,
       }
+      // Every chunk, before (and regardless of) the Firestore write: cheap,
+      // synchronous, no AI call. Only client speech can raise it.
+      setState((s) => {
+        const localRisk = nextLocalRisk(s.localRisk, chunk)
+        return localRisk === s.localRisk ? s : { ...s, localRisk }
+      })
       try {
         await updateDoc(doc(db, 'sessions', sessionId), {
           transcript: arrayUnion({
